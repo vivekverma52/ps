@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+build/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files (keep templates only)
+.env
+.env.*
+!.env.example
+!.env*.example
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Frontend artifacts
+frontend/dist/
+frontend/.vite/
+
+# Backend artifacts
+backend-nest/dist/
+backend-nest/coverage/
+backend-nest/.nestjs-cache/
+
+# Docker
+*.tar
