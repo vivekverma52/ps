@@ -54,7 +54,7 @@ export class MailService {
 
         <hr style="border:none;border-top:1px solid #e5e5e5;margin:24px 0;" />
         <p style="font-size:11px;color:#bbb;text-align:center;margin:0;">
-          © 2026 Askim Technologies Pvt. Ltd.
+          © 2026 ExatoTechnologies Pvt. Ltd.
         </p>
       </div>
     `;

@@ -62,7 +62,7 @@ export class PrescriptionsController {
   @UseInterceptors(
     FileInterceptor('image', {
       storage: memoryStorage(),
-      limits: { fileSize: 10 * 1024 * 1024 },
+      limits: { fileSize: 20 * 1024 * 1024 },
       fileFilter: (_req, file, cb) => {
         if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
           cb(null, true);
@@ -78,26 +78,25 @@ export class PrescriptionsController {
     @UploadedFile() file: Express.Multer.File,
     @Res() res: Response,
   ) {
-    this.logger.log(`[CREATE] Request by doctor=${user.userId} patient=${body.patient_name}`);
+    this.logger.log(`[UPLOAD] START doctor=${user.userId} orgId=${user.orgId} patient="${body.patient_name}" language=${body.language}`);
 
-    this.logger.log(`[SUBSCRIPTION] Checking limit for org=${user.orgId}`);
+    this.logger.log(`[UPLOAD] Checking subscription limit orgId=${user.orgId}`);
     await this.prescriptionService.assertSubscriptionLimit(user.orgId);
-    this.logger.log(`[SUBSCRIPTION] Limit OK`);
+    this.logger.log(`[UPLOAD] Subscription limit OK`);
 
     let imageKey: string | null = null;
     let imageUrl: string | null = null;
     if (file) {
-      this.logger.log(`[S3] Uploading image — name=${file.originalname} size=${file.size}B type=${file.mimetype}`);
+      const fileSizeKB = (file.size / 1024).toFixed(1);
+      this.logger.log(`[UPLOAD] Image received — name="${file.originalname}" size=${fileSizeKB}KB type=${file.mimetype}`);
       imageKey = await this.s3Service.uploadToS3(file.buffer, file.originalname, file.mimetype);
       imageUrl = this.s3Service.getObjectUrl(imageKey);
-      this.logger.log(`[S3] Upload complete — key=${imageKey}`);
-      this.logger.log(`[S3] Full S3 URL — ${imageUrl}`);
+      this.logger.log(`[UPLOAD] S3 upload complete — key=${imageKey}`);
     } else {
-      this.logger.log(`[S3] No image attached — skipping upload`);
+      this.logger.warn(`[UPLOAD] No image file attached — prescription will have no image`);
     }
 
-    // DB always stores the short S3 key (imageKey) — URL is derived on read
-    this.logger.log(`[DB] Creating prescription record — storing image_key=${imageKey}`);
+    this.logger.log(`[UPLOAD] Saving prescription to DB — imageKey=${imageKey ?? 'none'}`);
     const prescription = await this.prescriptionService.createPrescription({
       userId: user.userId,
       userName: user.name,
@@ -109,25 +108,25 @@ export class PrescriptionsController {
       notes: body.notes,
       imageKey,
     });
-    this.logger.log(`[DB] Prescription created — id=${prescription.id} patient_uid=${prescription.patient_uid}`);
+    this.logger.log(`[UPLOAD] DB record created — prescriptionId=${prescription.id} patient_uid=${prescription.patient_uid}`);
 
     if (imageKey && imageUrl) {
       const uploadQueueUrl = this.configService.get<string>('SQS_UPLOAD_QUEUE_URL');
-      // DB stores short key (image_key = "prescriptions/prescription-xxx.png")
-      // SQS sends full S3 URL as imageKey so the external service can fetch the image directly
-      this.logger.log(`[SQS] DB image_key = ${imageKey}`);
-      this.logger.log(`[SQS] Sending full S3 URL as imageKey = ${imageUrl}`);
-      this.logger.log(`[SQS] patientId = ${prescription.patient_uid}`);
-      await this.sqsService.sendMessage(uploadQueueUrl, {
-        imageKey: imageUrl,
-        patientId: prescription.patient_uid,
-      });
-      this.logger.log(`[SQS] Message enqueued successfully`);
+      if (!uploadQueueUrl) {
+        this.logger.warn(`[UPLOAD] SQS_UPLOAD_QUEUE_URL not configured — OCR will NOT run for prescriptionId=${prescription.id}`);
+      } else {
+        this.logger.log(`[UPLOAD] Sending to OCR queue — prescriptionId=${prescription.id} patientId=${prescription.patient_uid} imageUrl=${imageUrl}`);
+        await this.sqsService.sendMessage(uploadQueueUrl, {
+          imageKey: imageUrl,
+          patientId: prescription.patient_uid,
+        });
+        this.logger.log(`[UPLOAD] OCR queue message sent — prescriptionId=${prescription.id}`);
+      }
     } else {
-      this.logger.log(`[SQS] No image — skipping queue send`);
+      this.logger.log(`[UPLOAD] No image — skipping OCR queue send prescriptionId=${prescription.id}`);
     }
 
-    this.logger.log(`[CREATE] Done — prescription=${prescription.id}`);
+    this.logger.log(`[UPLOAD] DONE prescriptionId=${prescription.id} hasImage=${!!imageKey}`);
     return res.status(201).json({ success: true, message: 'Prescription created', data: prescription });
   }
 
@@ -182,8 +181,24 @@ export class PrescriptionsController {
     @Body() body: UpdateRenderDto,
     @Res() res: Response,
   ) {
+    this.logger.log(`[RENDER] Triggered by userId=${user.userId} role=${user.role} prescriptionId=${id}`);
     const prescription = await this.prescriptionService.updateRender(id, user.userId, body.video_url);
+    this.logger.log(`[RENDER] Complete prescriptionId=${id} status=${prescription?.status}`);
     return res.status(200).json({ success: true, message: 'Prescription updated', data: prescription });
+  }
+
+  @Put(':id/patient-details')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('DOCTOR', 'PHARMACIST')
+  async updatePatientDetails(
+    @Param('id') id: string,
+    @CurrentUser() user: any,
+    @Body() body: { patient_name?: string; patient_phone?: string },
+    @Res() res: Response,
+  ) {
+    this.logger.log(`[PATIENT:UPDATE] userId=${user.userId} prescriptionId=${id}`);
+    const result = await this.prescriptionService.updatePatientDetails(id, user.orgId, body);
+    return res.status(200).json({ success: true, message: 'Patient details updated', data: result });
   }
 
   @Put(':id/status')
@@ -219,7 +234,7 @@ export class PrescriptionsController {
   @Get('medicines/search')
   @UseGuards(JwtAuthGuard)
   async searchMedicines(@Query('q') q: string, @Res() res: Response) {
-    const results = this.prescriptionService.searchMedicines(q || '');
+    const results = await this.prescriptionService.searchMedicines(q || '');
     return res.status(200).json({ success: true, data: results });
   }
 
@@ -232,7 +247,9 @@ export class PrescriptionsController {
     @Body() body: AddMedicineDto,
     @Res() res: Response,
   ) {
+    this.logger.log(`[MEDICINE:ADD] pharmacist=${user.userId} orgId=${user.orgId} prescriptionId=${id} medicine="${body.name}"`);
     const result = await this.prescriptionService.addMedicineToRx(id, user.orgId, body);
+    this.logger.log(`[MEDICINE:ADD] Success — medId=${result.id} prescriptionId=${id}`);
     return res.status(201).json({ success: true, message: 'Medicine added', data: result });
   }
 
@@ -246,7 +263,9 @@ export class PrescriptionsController {
     @Body() body: UpdateMedicineDto,
     @Res() res: Response,
   ) {
+    this.logger.log(`[MEDICINE:UPDATE] pharmacist=${user.userId} orgId=${user.orgId} prescriptionId=${id} medId=${medId}`);
     const result = await this.prescriptionService.updateMedicineInRx(id, medId, user.orgId, body);
+    this.logger.log(`[MEDICINE:UPDATE] Success — medId=${medId} prescriptionId=${id}`);
     return res.status(200).json({ success: true, message: 'Medicine updated', data: result });
   }
 
@@ -259,7 +278,9 @@ export class PrescriptionsController {
     @CurrentUser() user: any,
     @Res() res: Response,
   ) {
+    this.logger.log(`[MEDICINE:DELETE] pharmacist=${user.userId} orgId=${user.orgId} prescriptionId=${id} medId=${medId}`);
     await this.prescriptionService.deleteMedicineFromRx(id, medId, user.orgId);
+    this.logger.log(`[MEDICINE:DELETE] Success — medId=${medId} prescriptionId=${id}`);
     return res.status(200).json({ success: true, message: 'Medicine removed', data: null });
   }
 
@@ -316,7 +337,7 @@ export class MedicinePrescriptionsController {
   @UseInterceptors(
     FileInterceptor('image', {
       storage: memoryStorage(),
-      limits: { fileSize: 10 * 1024 * 1024 },
+      limits: { fileSize: 20 * 1024 * 1024 },
       fileFilter: (_req, file, cb) => {
         if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
           cb(null, true);

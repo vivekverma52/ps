@@ -30,8 +30,18 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # Allow up to 20MB uploads (mobile camera photos can be 10-15MB)
+    client_max_body_size 20M;
+
     location / {
         try_files $uri $uri/ /index.html;
+        # Never cache index.html — ensures mobile always gets the latest chunk filenames
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+    }
+
+    location /assets/ {
+        # JS/CSS assets have content hashes in filenames — cache aggressively
+        add_header Cache-Control "public, max-age=31536000, immutable";
     }
 
     location /api {
@@ -43,6 +53,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 60s;
     }
 
     location /uploads {

@@ -3,10 +3,6 @@ import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 export class AddMedicineDto {
   @IsString()
   @IsNotEmpty()
-  prescription_id: string;
-
-  @IsString()
-  @IsNotEmpty()
   name: string;
 
   @IsOptional()

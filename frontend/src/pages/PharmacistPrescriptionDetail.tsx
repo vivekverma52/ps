@@ -76,11 +76,24 @@ function MedicineForm({
   onCancel?: () => void
 }) {
   const [form, setForm] = useState(initial)
+  const [allMedicines, setAllMedicines] = useState<string[]>([])
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [showSug, setShowSug] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const nameRef = useRef<HTMLInputElement>(null)
-  const sugRef = useRef<HTMLDivElement>(null)
+  const nameRef    = useRef<HTMLInputElement>(null)
+  const sugRef     = useRef<HTMLDivElement>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Load full medicine list from MongoDB on mount
+  useEffect(() => {
+    api.get('/prescriptions/medicines/search?q=')
+      .then(res => {
+        const data: string[] = res.data.data ?? []
+        setAllMedicines(data)
+        setSuggestions(data)
+      })
+      .catch(() => {})
+  }, [])
 
   // Close suggestions on outside click
   useEffect(() => {
@@ -93,15 +106,22 @@ function MedicineForm({
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const searchMedicines = async (q: string) => {
+  const searchMedicines = (q: string) => {
     setForm(f => ({ ...f, name: q }))
-    if (q.length < 1) { setSuggestions([]); setShowSug(false); return }
-    try {
-      const res = await api.get(`/prescriptions/medicines/search?q=${encodeURIComponent(q)}`)
-      const data: string[] = res.data.data ?? []
-      setSuggestions(data)
-      setShowSug(data.length > 0)
-    } catch { setSuggestions([]) }
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await api.get(`/prescriptions/medicines/search?q=${encodeURIComponent(q)}`)
+        const data: string[] = res.data.data ?? []
+        setSuggestions(data)
+        setShowSug(data.length > 0)
+      } catch { setSuggestions(allMedicines) }
+    }, 300)
+  }
+
+  const handleFocus = () => {
+    setSuggestions(form.name.trim() ? suggestions : allMedicines)
+    setShowSug(true)
   }
 
   const toggleFreq = (f: string) => {
@@ -153,11 +173,11 @@ function MedicineForm({
         <input
           ref={nameRef}
           style={field}
-          placeholder="Type medicine name (e.g. Zifi 200)"
+          placeholder="Click or type to search medicines"
           value={form.name}
           autoFocus={!initial.id}
           onChange={e => searchMedicines(e.target.value)}
-          onFocus={() => form.name && suggestions.length > 0 && setShowSug(true)}
+          onFocus={handleFocus}
           autoComplete="off"
         />
         {showSug && suggestions.length > 0 && (
@@ -281,11 +301,23 @@ function OcrMedicineForm({ initial, onSave, onCancel }: {
       : initial.time_of_day ? (initial.time_of_day as string).split(',').map(s => s.trim()).filter(Boolean) : [],
     text: initial.text ?? { en: '' },
   })
+  const [allMedicines, setAllMedicines] = useState<string[]>([])
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [showSug, setShowSug] = useState(false)
-  const nameRef    = useRef<HTMLInputElement>(null)
-  const sugRef     = useRef<HTMLDivElement>(null)
+  const nameRef     = useRef<HTMLInputElement>(null)
+  const sugRef      = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Load full medicine list from MongoDB on mount
+  useEffect(() => {
+    api.get('/prescriptions/medicines/search?q=')
+      .then(res => {
+        const data: string[] = res.data.data ?? []
+        setAllMedicines(data)
+        setSuggestions(data)
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -299,15 +331,19 @@ function OcrMedicineForm({ initial, onSave, onCancel }: {
   const searchMedicines = (q: string) => {
     setForm(f => ({ ...f, medicine_name: q }))
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    if (q.length < 1) { setSuggestions([]); setShowSug(false); return }
     debounceRef.current = setTimeout(async () => {
       try {
         const res = await api.get(`/prescriptions/medicines/search?q=${encodeURIComponent(q)}`)
         const data: string[] = res.data.data ?? []
         setSuggestions(data)
         setShowSug(data.length > 0)
-      } catch { setSuggestions([]) }
+      } catch { setSuggestions(allMedicines) }
     }, 300)
+  }
+
+  const handleFocusOcr = () => {
+    setSuggestions(form.medicine_name.trim() ? suggestions : allMedicines)
+    setShowSug(true)
   }
 
   const setField = (k: 'dosage' | 'instructions' | 'duration' | 'with_food') =>
@@ -336,9 +372,9 @@ function OcrMedicineForm({ initial, onSave, onCancel }: {
           autoFocus
           autoComplete="off"
           value={form.medicine_name}
-          placeholder="Type to search medicines…"
+          placeholder="Click or type to search medicines…"
           onChange={e => searchMedicines(e.target.value)}
-          onFocus={() => form.medicine_name && suggestions.length > 0 && setShowSug(true)}
+          onFocus={handleFocusOcr}
         />
         {showSug && suggestions.length > 0 && (
           <div ref={sugRef} style={{
@@ -479,6 +515,12 @@ export default function PharmacistPrescriptionDetail() {
   const [ocrEditIdx, setOcrEditIdx] = useState<number | null>(null)
   const [showAddOcr, setShowAddOcr] = useState(false)
   const [ocrSaving, setOcrSaving] = useState(false)
+  const [showAddManual, setShowAddManual] = useState(false)
+  const [editManualId, setEditManualId] = useState<string | null>(null)
+  const [deletingMedId, setDeletingMedId] = useState<string | null>(null)
+  const [editingPatient, setEditingPatient] = useState(false)
+  const [patientForm, setPatientForm] = useState({ patient_name: '', patient_phone: '' })
+  const [savingPatient, setSavingPatient] = useState(false)
 
   const publicUrl = `${window.location.origin}/public/${prescription?.access_token}`
 
@@ -589,6 +631,39 @@ export default function PharmacistPrescriptionDetail() {
   }
 
 
+  const handleDeleteMed = async (medId: string, name: string) => {
+    if (!confirm(`Remove "${name}"?`)) return
+    setDeletingMedId(medId)
+    try {
+      await api.delete(`/prescriptions/${prescription!.id}/medicines/${medId}`)
+      toast.success('Medicine removed')
+      fetchPrescription()
+    } catch {
+      toast.error('Failed to remove medicine')
+    } finally {
+      setDeletingMedId(null)
+    }
+  }
+
+  const handleSavePatient = async () => {
+    if (!patientForm.patient_name.trim()) return toast.error('Patient name is required')
+    if (!/^\d{10}$/.test(patientForm.patient_phone.trim())) return toast.error('Enter a valid 10-digit phone number')
+    setSavingPatient(true)
+    try {
+      await api.put(`/prescriptions/${prescription!.id}/patient-details`, {
+        patient_name: patientForm.patient_name.trim(),
+        patient_phone: patientForm.patient_phone.trim(),
+      })
+      toast.success('Patient details updated')
+      setEditingPatient(false)
+      fetchPrescription()
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to update patient details')
+    } finally {
+      setSavingPatient(false)
+    }
+  }
+
   const handleRender = async () => {
     const pharmacistMeds = prescription?.interpreted_data?.medicines?.length ?? 0
     const ocrMeds = (prescription?.interpreted_data as any)?.interpreted_data?.medicines?.length ?? 0
@@ -608,7 +683,7 @@ export default function PharmacistPrescriptionDetail() {
   const handleSend = async () => {
     if (!prescription) return
     const msg = encodeURIComponent(
-      `Hello ${prescription.patient_name},\n\nYour prescription from Dr. ${prescription.doctor_name} is ready.\n\nView here: ${publicUrl}\n\n- Askim Technologies`
+      `Hello ${prescription.patient_name},\n\nYour prescription from Dr. ${prescription.doctor_name} is ready.\n\nView here: ${publicUrl}\n\n- ExatoTechnologies`
     )
     window.open(`https://wa.me/91${prescription.patient_phone}?text=${msg}`, '_blank')
     setSending(true)
@@ -853,6 +928,75 @@ export default function PharmacistPrescriptionDetail() {
                   </span>
                 </div>
 
+                {/* ── Patient Details (editable) ── */}
+                <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 9, background: 'var(--cell)', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: editingPatient ? 10 : 0 }}>
+                    <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-light)', textTransform: 'uppercase', letterSpacing: '.5px' }}>Patient Details</p>
+                    {!editingPatient && (
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ fontSize: 10 }}
+                        onClick={() => {
+                          setPatientForm({ patient_name: prescription.patient_name, patient_phone: prescription.patient_phone })
+                          setEditingPatient(true)
+                        }}>
+                        Edit
+                      </button>
+                    )}
+                  </div>
+
+                  {editingPatient ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div>
+                        <label style={{ ...lbl, marginBottom: 3 }}>Patient Name *</label>
+                        <input
+                          style={field}
+                          value={patientForm.patient_name}
+                          onChange={e => setPatientForm(f => ({ ...f, patient_name: e.target.value }))}
+                          placeholder="Patient full name"
+                        />
+                      </div>
+                      <div>
+                        <label style={{ ...lbl, marginBottom: 3 }}>Mobile Number *</label>
+                        <input
+                          style={field}
+                          value={patientForm.patient_phone}
+                          onChange={e => setPatientForm(f => ({ ...f, patient_phone: e.target.value }))}
+                          placeholder="10-digit number"
+                          type="tel"
+                          maxLength={10}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          className="btn btn-teal"
+                          style={{ flex: 1, justifyContent: 'center', fontSize: 12, opacity: savingPatient ? .65 : 1 }}
+                          disabled={savingPatient}
+                          onClick={handleSavePatient}>
+                          {savingPatient ? 'Saving…' : 'Save'}
+                        </button>
+                        <button
+                          className="btn btn-ghost"
+                          style={{ fontSize: 12 }}
+                          onClick={() => setEditingPatient(false)}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+                      <div>
+                        <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 2 }}>Name</p>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{prescription.patient_name}</p>
+                      </div>
+                      <div>
+                        <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 2 }}>Mobile</p>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{prescription.patient_phone}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Hospital + Doctor */}
                 {(hospital?.name || doctor?.name) && (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
@@ -988,6 +1132,124 @@ export default function PharmacistPrescriptionDetail() {
             )
           })()}
 
+          {/* ── Manual Medicines Panel (always visible) ── */}
+          {(() => {
+            const manualMeds: Medicine[] = prescription.interpreted_data?.medicines ?? []
+            return (
+              <div className="card" style={{ padding: '16px 18px' }}>
+                {/* Header */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--teal-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2">
+                        <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/>
+                      </svg>
+                    </div>
+                    <div>
+                      <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Medicines</p>
+                      <p style={{ fontSize: 10, color: 'var(--ink-light)', margin: 0 }}>
+                        {manualMeds.length === 0 ? 'No medicines added yet' : `${manualMeds.length} medicine${manualMeds.length > 1 ? 's' : ''} added`}
+                      </p>
+                    </div>
+                  </div>
+                  {!showAddManual && editManualId === null && (
+                    <button
+                      className="btn btn-teal btn-sm"
+                      onClick={() => { setShowAddManual(true); setEditManualId(null) }}
+                      style={{ fontSize: 11 }}>
+                      + Add Medicine
+                    </button>
+                  )}
+                </div>
+
+                {/* No OCR notice — shown only when OCR has not processed this prescription */}
+                {(!prescription.interpreted_data || !(prescription.interpreted_data as any).ocr_source) && (
+                  <div style={{ marginBottom: 12, padding: '9px 12px', borderRadius: 9, background: 'rgba(217,119,6,.07)', border: '1px solid rgba(217,119,6,.2)' }}>
+                    <p style={{ fontSize: 11, color: '#92400e', margin: 0 }}>
+                      OCR service is not running. Add medicines manually below, then click <strong>Render</strong>.
+                    </p>
+                  </div>
+                )}
+
+                {/* Medicine list */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {manualMeds.map(med =>
+                    editManualId === med.id ? (
+                      <div key={med.id} style={{ padding: 14, borderRadius: 10, background: 'var(--teal-light)', border: '1.5px solid rgba(0,184,148,.3)' }}>
+                        <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal-dark)', marginBottom: 10 }}>Edit medicine</p>
+                        <MedicineForm
+                          prescriptionId={prescription.id}
+                          initial={{
+                            id: med.id,
+                            name: med.name,
+                            quantity: med.quantity,
+                            frequency: med.frequency ? med.frequency.split(', ') : [],
+                            course: med.course,
+                            description: med.description ?? '',
+                          }}
+                          submitLabel="Save Changes"
+                          onDone={() => { setEditManualId(null); fetchPrescription() }}
+                          onCancel={() => setEditManualId(null)}
+                        />
+                      </div>
+                    ) : (
+                      <div key={med.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '9px 12px', borderRadius: 9, background: 'var(--cell)', border: '1px solid var(--border)' }}>
+                        <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--teal-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.5">
+                            <path d="M12 5v14M5 12h14"/>
+                          </svg>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 3 }}>{med.name}</p>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px' }}>
+                            {med.quantity  && <span style={{ fontSize: 11, color: 'var(--ink-light)' }}>Qty: <span style={{ color: 'var(--ink)' }}>{med.quantity}/day</span></span>}
+                            {med.frequency && <span style={{ fontSize: 11, color: 'var(--ink-light)' }}>Freq: <span style={{ color: 'var(--ink)' }}>{med.frequency}</span></span>}
+                            {med.course    && <span style={{ fontSize: 11, color: 'var(--ink-light)' }}>Duration: <span style={{ color: 'var(--ink)' }}>{med.course}</span></span>}
+                            {med.description && <span style={{ fontSize: 11, color: 'var(--ink-light)', width: '100%' }}>Note: <span style={{ color: 'var(--ink)' }}>{med.description}</span></span>}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => { setEditManualId(med.id); setShowAddManual(false) }}
+                            style={{ fontSize: 11 }}>
+                            Edit
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => handleDeleteMed(med.id, med.name)}
+                            disabled={deletingMedId === med.id}
+                            style={{ fontSize: 11, color: '#ef4444' }}>
+                            {deletingMedId === med.id ? '…' : '✕'}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  )}
+
+                  {manualMeds.length === 0 && !showAddManual && (
+                    <p style={{ fontSize: 12, color: 'var(--ink-light)', fontStyle: 'italic' }}>
+                      No medicines added. Click "+ Add Medicine" to start.
+                    </p>
+                  )}
+
+                  {/* Add form */}
+                  {showAddManual && (
+                    <div style={{ padding: 14, borderRadius: 10, background: 'var(--teal-light)', border: '1.5px solid rgba(0,184,148,.3)' }}>
+                      <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal-dark)', marginBottom: 10 }}>Add Medicine</p>
+                      <MedicineForm
+                        prescriptionId={prescription.id}
+                        initial={{ ...EMPTY_FORM }}
+                        submitLabel="Add Medicine"
+                        onDone={() => { setShowAddManual(false); fetchPrescription() }}
+                        onCancel={() => setShowAddManual(false)}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
 
         </div>
       </div>

@@ -63,7 +63,7 @@ export default function PublicPage() {
       {/* Header */}
       <div className="bg-teal-500 text-white px-5 py-5">
         <div className="max-w-lg mx-auto">
-          <p className="text-teal-100 text-xs mb-1">Askim Technologies — Multimedia Prescription</p>
+          <p className="text-teal-100 text-xs mb-1">ExatoTechnologies — Multimedia Prescription</p>
           <h1 className="text-xl font-semibold">Hello, {data.patient_name}</h1>
           <p className="text-teal-100 text-sm mt-0.5">
             Prescription from {data.doctor_name}
@@ -162,7 +162,7 @@ export default function PublicPage() {
 
         {/* Footer */}
         <div className="text-center pb-4">
-          <p className="text-xs text-gray-300">Powered by Askim Technologies Pvt. Ltd.</p>
+          <p className="text-xs text-gray-300">Powered by ExatoTechnologies Pvt. Ltd.</p>
           <p className="text-xs text-gray-300 mt-0.5">This prescription is digitally verified</p>
         </div>
       </div>

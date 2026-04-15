@@ -18,6 +18,12 @@ const authApi = axios.create({
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
   if (token) config.headers.Authorization = `Bearer ${token}`
+  // When sending FormData, delete the default Content-Type so the browser
+  // can set it automatically with the correct multipart/form-data boundary.
+  // Using `undefined` is not reliable on mobile browsers — deletion is.
+  if (config.data instanceof FormData) {
+    delete config.headers['Content-Type']
+  }
   return config
 })
 

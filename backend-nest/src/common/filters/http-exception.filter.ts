@@ -32,9 +32,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     // ── Multer: file too large ─────────────────────────────────────────────
     if ((exception as any)?.code === 'LIMIT_FILE_SIZE') {
+      this.logger.warn('File upload rejected: too large', {
+        ...base,
+        errorCode: 'FILE_TOO_LARGE',
+      });
       return res.status(400).json({
         success:   false,
-        message:   'File too large. Max 10 MB allowed.',
+        message:   'File too large. Max 20 MB allowed.',
         errorCode: 'FILE_TOO_LARGE',
       });
     }
@@ -150,8 +154,34 @@ export class AllExceptionsFilter implements ExceptionFilter {
       });
     }
 
-    // ── Unknown / programming error → stderr ──────────────────────────────
+    // ── MongoDB errors (MongoServerError, MongoError) ─────────────────────
     const err = exception as any;
+    if (err?.name === 'MongoServerError' || err?.name === 'MongoError') {
+      this.logger.error('MongoDB error', {
+        ...base,
+        errorName:  err.name,
+        errorMsg:   err.message,
+        mongoCode:  err.code,
+        collection: err?.result?.result?.ns ?? undefined,
+      }, err?.stack);
+
+      // Duplicate key → surface as 409 conflict
+      if (err.code === 11000) {
+        return res.status(409).json({
+          success:   false,
+          message:   'Duplicate entry — resource already exists.',
+          errorCode: 'CONFLICT',
+        });
+      }
+
+      return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+        success:   false,
+        message:   'A database error occurred. Please try again later.',
+        errorCode: 'DB_ERROR',
+      });
+    }
+
+    // ── Unknown / programming error → stderr ──────────────────────────────
     this.logger.error('Unhandled exception', {
       ...base,
       errorName: err?.name,

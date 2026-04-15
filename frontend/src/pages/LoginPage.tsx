@@ -362,7 +362,7 @@ export default function LoginPage() {
           )}
 
           <p style={{ textAlign: 'center', fontSize: 11, color: 'var(--ink-light)', marginTop: 36 }}>
-            © 2026 Askim Technologies Pvt. Ltd.
+            © 2026 ExatoTechnologies Pvt. Ltd.
           </p>
         </div>
       </div>

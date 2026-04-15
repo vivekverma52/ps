@@ -47,7 +47,7 @@ export default function NewPrescriptionPage() {
       form.append('language', data.language)
       if (data.notes) form.append('notes', data.notes)
       if (file) form.append('image', file)
-      const res = await api.post('/prescriptions', form, { headers: { 'Content-Type': undefined } })
+      const res = await api.post('/prescriptions', form)
       const prescription = res.data.data
 
       // Save demo interpreted data (replace with real AI service call later)

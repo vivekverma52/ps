@@ -22,24 +22,6 @@ import {
 
 const VALID_STATUSES = ['UPLOADED', 'RENDERED', 'SENT'];
 
-const COMMON_MEDICINES = [
-  'Paracetamol 500mg', 'Paracetamol 650mg', 'Amoxicillin 250mg', 'Amoxicillin 500mg',
-  'Azithromycin 250mg', 'Azithromycin 500mg', 'Ciprofloxacin 500mg', 'Metronidazole 400mg',
-  'Zifi 200', 'Zifi 400', 'Cefixime 200mg', 'Cefpodoxime 200mg', 'Pantoprazole 40mg',
-  'Omeprazole 20mg', 'Rabeprazole 20mg', 'Ranitidine 150mg', 'Cetirizine 10mg',
-  'Loratadine 10mg', 'Montelukast 10mg', 'Atorvastatin 10mg', 'Atorvastatin 20mg',
-  'Rosuvastatin 10mg', 'Metformin 500mg', 'Metformin 1000mg', 'Glimepiride 1mg',
-  'Glimepiride 2mg', 'Amlodipine 5mg', 'Amlodipine 10mg', 'Telmisartan 40mg',
-  'Enalapril 5mg', 'Losartan 50mg', 'Aspirin 75mg', 'Aspirin 150mg', 'Clopidogrel 75mg',
-  'Pantop D', 'Pan 40', 'Dolo 650', 'Combiflam', 'Zerodol P', 'Crocin', 'Allegra 120mg',
-  'Montair LC', 'Sinarest', 'Zincovit', 'Becosules', 'Shelcal 500', 'Caldikind',
-  'Vitamin D3 60000 IU', 'Vitamin B12', 'Neurobion Forte', 'Becadexamin',
-  'Diclofenac 50mg', 'Ibuprofen 400mg', 'Ibuprofen 600mg', 'Naproxen 500mg',
-  'Tramadol 50mg', 'Ondansetron 4mg', 'Domperidone 10mg', 'Metoclopramide 10mg',
-  'Loperamide 2mg', 'Lactulose', 'Ispaghula Husk', 'Tab Berno', 'Tab Sertima',
-  'Sertraline 50mg', 'Escitalopram 10mg', 'Clonazepam 0.5mg', 'Alprazolam 0.25mg',
-];
-
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -387,12 +369,45 @@ export class PrescriptionService implements OnModuleInit {
       { $set: { video_key: videoKey, status: 'RENDERED' } },
     );
 
-    // ── Send render payload to my-standard-queue ─────────────────────────
+    // ── Build render payload and send to render queue ─────────────────────
     const renderQueueUrl = this.configService.get<string>('SQS_RENDER_QUEUE_URL');
-    if (renderQueueUrl) {
-      const ocr       = (prescription.interpreted_data as any)?.interpreted_data ?? {};
-      const medicines = ocr.medicines ?? [];
 
+    const ocr            = (prescription.interpreted_data as any)?.interpreted_data ?? {};
+    const ocrMedicines: any[]    = ocr.medicines ?? [];
+    const manualMedicines: any[] = (prescription.interpreted_data as any)?.medicines ?? [];
+
+    this.logger.log(
+      `[RENDER] prescriptionId=${prescription.id}` +
+      ` interpreted_data_exists=${!!prescription.interpreted_data}` +
+      ` ocr_source=${!!(prescription.interpreted_data as any)?.ocr_source}` +
+      ` ocrMedicines=${ocrMedicines.length}` +
+      ` manualMedicines=${manualMedicines.length}`,
+    );
+
+    // Convert manual medicines (pharmacist-added) to OCR payload format
+    const manualAsOcr = manualMedicines.map((m: any) => ({
+      medicine_name: m.name,
+      dosage:        m.quantity ? `${m.quantity} tablet(s)` : null,
+      instructions:  [m.frequency, m.description].filter(Boolean).join(' — ') || null,
+      duration:      m.course ?? null,
+      time_of_day:   m.frequency ? m.frequency.split(', ') : null,
+      with_food:     null,
+      text:          { en: m.name },
+    }));
+
+    // Merge: OCR medicines first, then manual ones
+    const allMedicines = [...ocrMedicines, ...manualAsOcr];
+
+    if (allMedicines.length === 0) {
+      this.logger.warn(`[RENDER] WARNING — zero medicines in render payload for prescription=${prescription.id}. Render may produce empty video.`);
+    } else {
+      this.logger.log(`[RENDER] Total medicines in payload=${allMedicines.length} (ocr=${ocrMedicines.length} manual=${manualMedicines.length})`);
+      allMedicines.forEach((m, i) => {
+        this.logger.log(`[RENDER]   [${i + 1}] name="${m.medicine_name}" dosage="${m.dosage}" duration="${m.duration}" time_of_day="${JSON.stringify(m.time_of_day)}"`);
+      });
+    }
+
+    if (renderQueueUrl) {
       const payload = {
         status:     'success',
         request_id: prescription.id,
@@ -408,10 +423,10 @@ export class PrescriptionService implements OnModuleInit {
           doctor_details: {
             name:           prescription.doctor_name,
             specialization: ocr.doctor_details?.qualifications ?? null,
-            clinic:         ocr.hospital_details?.name          ?? null,
-            registration:   ocr.doctor_details?.contact         ?? null,
+            clinic:         (ocr.hospital_details?.name ?? ocr.doctor_details?.clinic) ?? null,
+            registration:   ocr.doctor_details?.contact ?? null,
           },
-          medicines: medicines.map((m: any) => ({
+          medicines: allMedicines.map((m: any) => ({
             medicine_name: m.medicine_name,
             dosage:        m.dosage        ?? null,
             instructions:  m.instructions  ?? null,
@@ -426,14 +441,30 @@ export class PrescriptionService implements OnModuleInit {
         },
       };
 
-      this.logger.log(`[Render Queue] Sending payload for prescription=${prescription.id} medicines=${medicines.length}`);
+      this.logger.log(`[RENDER] Sending SQS payload to queue=${renderQueueUrl} prescriptionId=${prescription.id} totalMedicines=${allMedicines.length}`);
       await this.sqsService.sendMessage(renderQueueUrl, payload);
-      this.logger.log(`[Render Queue] Payload sent to ${renderQueueUrl}`);
+      this.logger.log(`[RENDER] SQS message enqueued successfully prescriptionId=${prescription.id}`);
     } else {
-      this.logger.warn('[Render Queue] SQS_RENDER_QUEUE_URL not set — skipping render queue send');
+      this.logger.warn('[RENDER] SQS_RENDER_QUEUE_URL not set — skipping render queue send');
     }
 
     const updated = await this.prescriptionModel.findOne({ id: prescription.id }).lean();
+    return this.withUrls(updated);
+  }
+
+  async updatePatientDetails(prescriptionId: string, actorOrgId: string, body: { patient_name?: string; patient_phone?: string }) {
+    this.logger.log(`[PATIENT:UPDATE] prescriptionId=${prescriptionId} orgId=${actorOrgId}`);
+    const doc = await this.getPrescriptionRaw(prescriptionId);
+    if (doc.org_id && doc.org_id !== actorOrgId) throw AppError.forbidden('Prescription belongs to a different organization');
+
+    const updates: Record<string, string> = {};
+    if (body.patient_name?.trim())  updates.patient_name  = body.patient_name.trim();
+    if (body.patient_phone?.trim()) updates.patient_phone = body.patient_phone.trim();
+    if (Object.keys(updates).length === 0) throw AppError.badRequest('No fields to update');
+
+    await this.prescriptionModel.updateOne({ id: prescriptionId }, { $set: updates });
+    this.logger.log(`[PATIENT:UPDATE] Done — prescriptionId=${prescriptionId} updated=${JSON.stringify(updates)}`);
+    const updated = await this.prescriptionModel.findOne({ id: prescriptionId }).lean();
     return this.withUrls(updated);
   }
 
@@ -517,11 +548,19 @@ export class PrescriptionService implements OnModuleInit {
   }
 
   async addMedicineToRx(prescriptionId: string, actorOrgId: string, body: { name: string; quantity?: string; frequency: string; course: string; description?: string }) {
+    this.logger.log(`[MEDICINE:ADD] prescriptionId=${prescriptionId} orgId=${actorOrgId} name="${body.name}"`);
     if (!body.name?.trim() || !body.frequency?.trim() || !body.course?.trim())
       throw AppError.badRequest('name, frequency and course are required');
 
     const doc = await this.getPrescriptionRaw(prescriptionId);
-    if (doc.org_id && doc.org_id !== actorOrgId) throw AppError.forbidden('Prescription belongs to a different organization');
+    if (doc.org_id && doc.org_id !== actorOrgId) {
+      this.logger.warn(`[MEDICINE:ADD] Forbidden — rx orgId=${doc.org_id} actor orgId=${actorOrgId}`);
+      throw AppError.forbidden('Prescription belongs to a different organization');
+    }
+
+    const hasInterpretedData = !!doc.interpreted_data;
+    this.logger.log(`[MEDICINE:ADD] interpreted_data exists=${hasInterpretedData} prescriptionId=${prescriptionId}`);
+
     const medicines: any[] = Array.isArray(doc.interpreted_data?.medicines)
       ? doc.interpreted_data.medicines : [];
 
@@ -535,23 +574,33 @@ export class PrescriptionService implements OnModuleInit {
     };
     medicines.push(med);
 
-    await this.prescriptionModel.updateOne(
-      { id: prescriptionId },
-      { $set: { 'interpreted_data.medicines': medicines } },
-    );
+    // interpreted_data may be null when OCR never ran — dot-notation $set fails on null,
+    // so initialize the whole object in that case.
+    const update = hasInterpretedData
+      ? { $set: { 'interpreted_data.medicines': medicines } }
+      : { $set: { interpreted_data: { medicines } } };
+    await this.prescriptionModel.updateOne({ id: prescriptionId }, update);
+    this.logger.log(`[MEDICINE:ADD] Done — medId=${med.id} name="${med.name}" totalMeds=${medicines.length}`);
     return med;
   }
 
   async updateMedicineInRx(prescriptionId: string, medicineId: string, actorOrgId: string, body: { name?: string; quantity?: string; frequency?: string; course?: string; description?: string }) {
+    this.logger.log(`[MEDICINE:UPDATE] prescriptionId=${prescriptionId} medicineId=${medicineId} orgId=${actorOrgId}`);
     if (Object.keys(body).length === 0) throw AppError.badRequest('No fields provided to update');
 
     const doc = await this.getPrescriptionRaw(prescriptionId);
-    if (doc.org_id && doc.org_id !== actorOrgId) throw AppError.forbidden('Prescription belongs to a different organization');
+    if (doc.org_id && doc.org_id !== actorOrgId) {
+      this.logger.warn(`[MEDICINE:UPDATE] Forbidden — rx orgId=${doc.org_id} actor orgId=${actorOrgId}`);
+      throw AppError.forbidden('Prescription belongs to a different organization');
+    }
     const medicines: any[] = Array.isArray(doc.interpreted_data?.medicines)
       ? doc.interpreted_data.medicines : [];
 
     const idx = medicines.findIndex((m: any) => m.id === medicineId);
-    if (idx === -1) throw AppError.notFound('Medicine');
+    if (idx === -1) {
+      this.logger.warn(`[MEDICINE:UPDATE] Medicine not found — medicineId=${medicineId} prescriptionId=${prescriptionId}`);
+      throw AppError.notFound('Medicine');
+    }
 
     medicines[idx] = {
       ...medicines[idx],
@@ -562,34 +611,59 @@ export class PrescriptionService implements OnModuleInit {
       ...(body.description !== undefined && { description: body.description.trim() }),
     };
 
-    await this.prescriptionModel.updateOne(
-      { id: prescriptionId },
-      { $set: { 'interpreted_data.medicines': medicines } },
-    );
+    const updateU = doc.interpreted_data
+      ? { $set: { 'interpreted_data.medicines': medicines } }
+      : { $set: { interpreted_data: { medicines } } };
+    await this.prescriptionModel.updateOne({ id: prescriptionId }, updateU);
+    this.logger.log(`[MEDICINE:UPDATE] Done — medicineId=${medicineId} name="${medicines[idx].name}"`);
     return medicines[idx];
   }
 
   async deleteMedicineFromRx(prescriptionId: string, medicineId: string, actorOrgId: string) {
+    this.logger.log(`[MEDICINE:DELETE] prescriptionId=${prescriptionId} medicineId=${medicineId} orgId=${actorOrgId}`);
     const doc = await this.getPrescriptionRaw(prescriptionId);
-    if (doc.org_id && doc.org_id !== actorOrgId) throw AppError.forbidden('Prescription belongs to a different organization');
+    if (doc.org_id && doc.org_id !== actorOrgId) {
+      this.logger.warn(`[MEDICINE:DELETE] Forbidden — rx orgId=${doc.org_id} actor orgId=${actorOrgId}`);
+      throw AppError.forbidden('Prescription belongs to a different organization');
+    }
     const medicines: any[] = Array.isArray(doc.interpreted_data?.medicines)
       ? doc.interpreted_data.medicines : [];
 
     const idx = medicines.findIndex((m: any) => m.id === medicineId);
-    if (idx === -1) throw AppError.notFound('Medicine');
+    if (idx === -1) {
+      this.logger.warn(`[MEDICINE:DELETE] Medicine not found — medicineId=${medicineId} prescriptionId=${prescriptionId}`);
+      throw AppError.notFound('Medicine');
+    }
+    const removedName = medicines[idx].name;
     medicines.splice(idx, 1);
 
-    await this.prescriptionModel.updateOne(
-      { id: prescriptionId },
-      { $set: { 'interpreted_data.medicines': medicines } },
-    );
+    const updateD = doc.interpreted_data
+      ? { $set: { 'interpreted_data.medicines': medicines } }
+      : { $set: { interpreted_data: { medicines } } };
+    await this.prescriptionModel.updateOne({ id: prescriptionId }, updateD);
+    this.logger.log(`[MEDICINE:DELETE] Done — removed "${removedName}" remainingMeds=${medicines.length}`);
     return { message: 'Medicine removed' };
   }
 
-  searchMedicines(query: string): string[] {
-    const q = (query || '').toLowerCase().trim();
-    if (q.length < 1) return [];
-    return COMMON_MEDICINES.filter((m) => m.toLowerCase().includes(q)).slice(0, 15);
+  async searchMedicines(query: string): Promise<string[]> {
+    const q = (query || '').trim();
+
+    // Empty query → return first 20 medicines alphabetically (for initial dropdown load)
+    const filter = q.length > 0
+      ? { medicine_name: { $regex: escapeRegex(q), $options: 'i' } }
+      : {};
+
+    this.logger.log(`[MEDICINE:SEARCH] query="${q}" filter=${q.length > 0 ? 'regex' : 'all'}`);
+
+    const docs = await this.medicineLibraryModel
+      .find(filter, { medicine_name: 1, _id: 0 })
+      .sort({ medicine_name: 1 })
+      .limit(20)
+      .lean();
+
+    const results = docs.map((d: any) => d.medicine_name);
+    this.logger.log(`[MEDICINE:SEARCH] query="${q}" results=${results.length}`);
+    return results;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
