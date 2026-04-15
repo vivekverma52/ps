@@ -518,6 +518,7 @@ export default function PharmacistPrescriptionDetail() {
   const [showAddManual, setShowAddManual] = useState(false)
   const [editManualId, setEditManualId] = useState<string | null>(null)
   const [deletingMedId, setDeletingMedId] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<{ type: 'manual'; id: string; name: string } | { type: 'ocr'; idx: number; name: string } | null>(null)
   const [editingPatient, setEditingPatient] = useState(false)
   const [patientForm, setPatientForm] = useState({ patient_name: '', patient_phone: '' })
   const [savingPatient, setSavingPatient] = useState(false)
@@ -613,8 +614,11 @@ export default function PharmacistPrescriptionDetail() {
     toast.success('Medicine updated')
   }
 
-  const handleOcrDelete = async (idx: number, name: string) => {
-    if (!confirm(`Remove "${name}"?`)) return
+  const handleOcrDelete = (idx: number, name: string) => {
+    setConfirmDelete({ type: 'ocr', idx, name })
+  }
+
+  const confirmOcrDelete = async (idx: number) => {
     const meds: typeof EMPTY_OCR[] = getOcrMeds()
     meds.splice(idx, 1)
     await saveOcrMedicines(meds)
@@ -631,8 +635,11 @@ export default function PharmacistPrescriptionDetail() {
   }
 
 
-  const handleDeleteMed = async (medId: string, name: string) => {
-    if (!confirm(`Remove "${name}"?`)) return
+  const handleDeleteMed = (medId: string, name: string) => {
+    setConfirmDelete({ type: 'manual', id: medId, name })
+  }
+
+  const confirmManualDelete = async (medId: string) => {
     setDeletingMedId(medId)
     try {
       await api.delete(`/prescriptions/${prescription!.id}/medicines/${medId}`)
@@ -1253,6 +1260,49 @@ export default function PharmacistPrescriptionDetail() {
 
         </div>
       </div>
+
+      {/* Remove Medicine Confirmation Dialog */}
+      {confirmDelete && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+          onClick={() => setConfirmDelete(null)}
+        >
+          <div
+            style={{ background: '#fff', borderRadius: 12, padding: 28, maxWidth: 360, width: '100%', boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8, color: '#1a1a2e' }}>Remove Medicine</div>
+            <div style={{ fontSize: 14, color: '#555', marginBottom: 24 }}>
+              Are you sure you want to remove <strong>"{confirmDelete.name}"</strong>? This action cannot be undone.
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setConfirmDelete(null)}
+                style={{ minWidth: 80 }}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-sm"
+                style={{ background: '#ef4444', color: '#fff', minWidth: 80, border: 'none' }}
+                disabled={!!deletingMedId}
+                onClick={async () => {
+                  const snap = confirmDelete
+                  setConfirmDelete(null)
+                  if (snap.type === 'manual') {
+                    await confirmManualDelete(snap.id)
+                  } else {
+                    await confirmOcrDelete(snap.idx)
+                  }
+                }}
+              >
+                {deletingMedId ? '…' : 'Remove'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </AppShell>

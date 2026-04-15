@@ -134,11 +134,15 @@ export class PlatformService {
       `SELECT COUNT(*) AS count FROM prescriptions
        WHERE MONTH(created_at) = MONTH(NOW()) AND YEAR(created_at) = YEAR(NOW())`,
     );
+    // Two derived-table JOINs replace the previous per-row correlated subqueries
     const [recentOrgs]: any = await this.pool.execute(
       `SELECT o.*,
-         (SELECT COUNT(*) FROM users u         WHERE u.org_id = o.id) AS user_count,
-         (SELECT COUNT(*) FROM prescriptions p WHERE p.org_id = o.id) AS prescription_count
-       FROM organizations o ORDER BY o.created_at DESC LIMIT 5`,
+         COALESCE(uc.user_count, 0)         AS user_count,
+         COALESCE(pc.prescription_count, 0) AS prescription_count
+       FROM organizations o
+       LEFT JOIN (SELECT org_id, COUNT(*) AS user_count         FROM users         GROUP BY org_id) uc ON uc.org_id = o.id
+       LEFT JOIN (SELECT org_id, COUNT(*) AS prescription_count FROM prescriptions GROUP BY org_id) pc ON pc.org_id = o.id
+       ORDER BY o.created_at DESC LIMIT 5`,
     );
     return {
       stats: {
@@ -155,20 +159,33 @@ export class PlatformService {
     const { search, plan, status } = query;
     if (status && !VALID_STATUSES.includes(status.toUpperCase())) throw AppError.validation('Invalid status filter');
 
+    // Derived-table JOINs run each aggregate once across all orgs,
+    // replacing the previous approach of N × 5 correlated subqueries.
     let sql = `
       SELECT o.*,
-        (SELECT COUNT(*) FROM users u         WHERE u.org_id = o.id) AS user_count,
-        (SELECT COUNT(*) FROM prescriptions p WHERE p.org_id = o.id) AS prescription_count,
-        (SELECT COUNT(*) FROM prescriptions p WHERE p.org_id = o.id
-           AND MONTH(p.created_at) = MONTH(NOW()) AND YEAR(p.created_at) = YEAR(NOW())) AS prescriptions_this_month,
-        (SELECT u.name  FROM users u WHERE u.id = o.owner_id LIMIT 1) AS owner_name,
-        (SELECT u.email FROM users u WHERE u.id = o.owner_id LIMIT 1) AS owner_email
-      FROM organizations o WHERE 1=1`;
+        COALESCE(uc.user_count, 0)                    AS user_count,
+        COALESCE(pc.prescription_count, 0)            AS prescription_count,
+        COALESCE(pm.prescriptions_this_month, 0)      AS prescriptions_this_month,
+        owner.name                                    AS owner_name,
+        owner.email                                   AS owner_email
+      FROM organizations o
+      LEFT JOIN (SELECT org_id, COUNT(*) AS user_count FROM users GROUP BY org_id) uc
+        ON uc.org_id = o.id
+      LEFT JOIN (SELECT org_id, COUNT(*) AS prescription_count FROM prescriptions GROUP BY org_id) pc
+        ON pc.org_id = o.id
+      LEFT JOIN (
+        SELECT org_id, COUNT(*) AS prescriptions_this_month
+        FROM prescriptions
+        WHERE MONTH(created_at) = MONTH(NOW()) AND YEAR(created_at) = YEAR(NOW())
+        GROUP BY org_id
+      ) pm ON pm.org_id = o.id
+      LEFT JOIN users owner ON owner.id = o.owner_id
+      WHERE 1=1`;
     const params: any[] = [];
     if (search) { sql += ' AND o.name LIKE ?'; params.push(`%${search.trim()}%`); }
     if (plan)   { sql += ' AND o.plan = ?';    params.push(plan.toUpperCase()); }
     if (status) { sql += ' AND o.status = ?';  params.push(status.toUpperCase()); }
-    sql += ' ORDER BY o.created_at DESC';
+    sql += ' ORDER BY o.created_at DESC LIMIT 200';
 
     const [orgs]: any = await this.pool.execute(sql, params);
     return orgs;

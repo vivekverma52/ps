@@ -8,7 +8,7 @@ export type MedicinePrescriptionDocument = MedicinePrescription & Document;
   collection: 'medicine_prescription',
 })
 export class MedicinePrescription {
-  @Prop({ required: true, trim: true })
+  @Prop({ required: true, trim: true, index: true })
   medicine_name: string;
 
   @Prop({ required: true, trim: true })

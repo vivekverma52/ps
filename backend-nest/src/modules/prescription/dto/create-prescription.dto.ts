@@ -1,13 +1,13 @@
 import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 
 export class CreatePrescriptionDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  patient_name: string;
+  patient_name?: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  patient_phone: string;
+  patient_phone?: string;
 
   @IsOptional()
   @IsString()

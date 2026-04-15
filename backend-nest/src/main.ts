@@ -18,6 +18,8 @@ const compression = require('compression') as () => any;
 const cookieParser = require('cookie-parser') as () => any;
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const mongoSanitize = require('express-mongo-sanitize') as { sanitize: (v: any) => any };
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const bodyParser = require('body-parser') as any;
 
 async function runMigrations() {
   await AppDataSource.initialize();
@@ -35,6 +37,7 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true,
+    bodyParser: false,  // disable default 100kb body-parser; we set an explicit limit below
   });
 
   const configService = app.get(ConfigService);
@@ -49,6 +52,13 @@ async function bootstrap() {
 
   // ── Disable ETag — prevents 304 on API responses ──────────────────────────
   app.set('etag', false);
+
+  // ── Body size limits (must be before any route handlers) ──────────────────
+  // Default Express/NestJS body-parser limit is 100kb — too small for some
+  // JSON payloads (interpreted data, medicine arrays). 1mb is the safe cap.
+  // Multipart (file uploads) is handled separately by Multer with its own 20mb limit.
+  app.use(bodyParser.json({ limit: '1mb' }));
+  app.use(bodyParser.urlencoded({ extended: true, limit: '1mb' }));
 
   // ── Security headers ───────────────────────────────────────────────────────
   app.use(helmet());

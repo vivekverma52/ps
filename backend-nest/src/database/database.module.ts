@@ -33,8 +33,8 @@ export const MYSQL_POOL = 'MYSQL_POOL';
           password:           configService.get<string>('DB_PASSWORD', ''),
           database,
           waitForConnections: true,
-          connectionLimit:    10,
-          queueLimit:         0,
+          connectionLimit:    50,   // raised from 10 — supports ~50 concurrent DB operations
+          queueLimit:         100,  // bounded queue — rejects beyond 100 waiting requests instead of growing forever
           connectTimeout:     10_000,
         });
 

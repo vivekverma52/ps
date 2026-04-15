@@ -30,8 +30,8 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
-    # Allow up to 20MB uploads (mobile camera photos can be 10-15MB)
-    client_max_body_size 20M;
+    # Allow up to 10MB uploads — matches the multer file size limit in the backend
+    client_max_body_size 10M;
 
     location / {
         try_files $uri $uri/ /index.html;

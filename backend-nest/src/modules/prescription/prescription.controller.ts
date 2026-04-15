@@ -62,7 +62,7 @@ export class PrescriptionsController {
   @UseInterceptors(
     FileInterceptor('image', {
       storage: memoryStorage(),
-      limits: { fileSize: 20 * 1024 * 1024 },
+      limits: { fileSize: 10 * 1024 * 1024 },
       fileFilter: (_req, file, cb) => {
         if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
           cb(null, true);
@@ -84,50 +84,57 @@ export class PrescriptionsController {
     await this.prescriptionService.assertSubscriptionLimit(user.orgId);
     this.logger.log(`[UPLOAD] Subscription limit OK`);
 
+    // Acquire upload slot — rejects if MAX_CONCURRENT_UPLOADS already in-flight
+    if (file) this.prescriptionService.acquireUploadSlot();
+
     let imageKey: string | null = null;
     let imageUrl: string | null = null;
-    if (file) {
-      const fileSizeKB = (file.size / 1024).toFixed(1);
-      this.logger.log(`[UPLOAD] Image received — name="${file.originalname}" size=${fileSizeKB}KB type=${file.mimetype}`);
-      imageKey = await this.s3Service.uploadToS3(file.buffer, file.originalname, file.mimetype);
-      imageUrl = this.s3Service.getObjectUrl(imageKey);
-      this.logger.log(`[UPLOAD] S3 upload complete — key=${imageKey}`);
-    } else {
-      this.logger.warn(`[UPLOAD] No image file attached — prescription will have no image`);
-    }
-
-    this.logger.log(`[UPLOAD] Saving prescription to DB — imageKey=${imageKey ?? 'none'}`);
-    const prescription = await this.prescriptionService.createPrescription({
-      userId: user.userId,
-      userName: user.name,
-      orgId: user.orgId,
-      hospitalId: user.hospitalId ?? null,
-      patient_name: body.patient_name,
-      patient_phone: body.patient_phone,
-      language: body.language,
-      notes: body.notes,
-      imageKey,
-    });
-    this.logger.log(`[UPLOAD] DB record created — prescriptionId=${prescription.id} patient_uid=${prescription.patient_uid}`);
-
-    if (imageKey && imageUrl) {
-      const uploadQueueUrl = this.configService.get<string>('SQS_UPLOAD_QUEUE_URL');
-      if (!uploadQueueUrl) {
-        this.logger.warn(`[UPLOAD] SQS_UPLOAD_QUEUE_URL not configured — OCR will NOT run for prescriptionId=${prescription.id}`);
+    try {
+      if (file) {
+        const fileSizeKB = (file.size / 1024).toFixed(1);
+        this.logger.log(`[UPLOAD] Image received — name="${file.originalname}" size=${fileSizeKB}KB type=${file.mimetype}`);
+        imageKey = await this.s3Service.uploadToS3(file.buffer, file.originalname, file.mimetype);
+        imageUrl = this.s3Service.getObjectUrl(imageKey);
+        this.logger.log(`[UPLOAD] S3 upload complete — key=${imageKey}`);
       } else {
-        this.logger.log(`[UPLOAD] Sending to OCR queue — prescriptionId=${prescription.id} patientId=${prescription.patient_uid} imageUrl=${imageUrl}`);
-        await this.sqsService.sendMessage(uploadQueueUrl, {
-          imageKey: imageUrl,
-          patientId: prescription.patient_uid,
-        });
-        this.logger.log(`[UPLOAD] OCR queue message sent — prescriptionId=${prescription.id}`);
+        this.logger.warn(`[UPLOAD] No image file attached — prescription will have no image`);
       }
-    } else {
-      this.logger.log(`[UPLOAD] No image — skipping OCR queue send prescriptionId=${prescription.id}`);
-    }
 
-    this.logger.log(`[UPLOAD] DONE prescriptionId=${prescription.id} hasImage=${!!imageKey}`);
-    return res.status(201).json({ success: true, message: 'Prescription created', data: prescription });
+      this.logger.log(`[UPLOAD] Saving prescription to DB — imageKey=${imageKey ?? 'none'}`);
+      const prescription = await this.prescriptionService.createPrescription({
+        userId: user.userId,
+        userName: user.name,
+        orgId: user.orgId,
+        hospitalId: user.hospitalId ?? null,
+        patient_name: body.patient_name,
+        patient_phone: body.patient_phone,
+        language: body.language,
+        notes: body.notes,
+        imageKey,
+      });
+      this.logger.log(`[UPLOAD] DB record created — prescriptionId=${prescription.id} patient_uid=${prescription.patient_uid}`);
+
+      if (imageKey && imageUrl) {
+        const uploadQueueUrl = this.configService.get<string>('SQS_UPLOAD_QUEUE_URL');
+        if (!uploadQueueUrl) {
+          this.logger.warn(`[UPLOAD] SQS_UPLOAD_QUEUE_URL not configured — OCR will NOT run for prescriptionId=${prescription.id}`);
+        } else {
+          this.logger.log(`[UPLOAD] Sending to OCR queue — prescriptionId=${prescription.id} patientId=${prescription.patient_uid} imageUrl=${imageUrl}`);
+          await this.sqsService.sendMessage(uploadQueueUrl, {
+            imageKey: imageUrl,
+            patientId: prescription.patient_uid,
+          });
+          this.logger.log(`[UPLOAD] OCR queue message sent — prescriptionId=${prescription.id}`);
+        }
+      } else {
+        this.logger.log(`[UPLOAD] No image — skipping OCR queue send prescriptionId=${prescription.id}`);
+      }
+
+      this.logger.log(`[UPLOAD] DONE prescriptionId=${prescription.id} hasImage=${!!imageKey}`);
+      return res.status(201).json({ success: true, message: 'Prescription created', data: prescription });
+    } finally {
+      if (file) this.prescriptionService.releaseUploadSlot();
+    }
   }
 
   @Get()
@@ -337,7 +344,7 @@ export class MedicinePrescriptionsController {
   @UseInterceptors(
     FileInterceptor('image', {
       storage: memoryStorage(),
-      limits: { fileSize: 20 * 1024 * 1024 },
+      limits: { fileSize: 10 * 1024 * 1024 },
       fileFilter: (_req, file, cb) => {
         if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
           cb(null, true);

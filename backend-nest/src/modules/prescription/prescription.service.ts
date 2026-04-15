@@ -33,9 +33,30 @@ function generatePatientUid(orgId: string | null, hospitalId: string | null, doc
   return `${seg(orgId, 'NORG')}-${seg(hospitalId, 'NOHOSP')}-${seg(doctorId, 'NODOC')}-${seg(rxId, rxId)}-${date}`;
 }
 
-@Injectable()                               
+@Injectable()
 export class PrescriptionService implements OnModuleInit {
   private readonly logger = new Logger(PrescriptionService.name);
+
+  // ── Upload concurrency guard ──────────────────────────────────────────────
+  // Each upload (~10MB typical) lives in Node.js heap during S3 transfer.
+  // Cap at 20 simultaneous uploads (~200MB peak) — safe for a 512MB ECS task.
+  // Raise to 40 if your ECS task is 1GB, 80 for 2GB.
+  private activeUploads = 0;
+  private readonly MAX_CONCURRENT_UPLOADS = 20;
+
+  acquireUploadSlot(): void {
+    if (this.activeUploads >= this.MAX_CONCURRENT_UPLOADS) {
+      this.logger.warn(`[UPLOAD] Concurrency limit reached — activeUploads=${this.activeUploads}`);
+      throw AppError.tooManyRequests('Server is busy processing uploads. Please try again in a moment.');
+    }
+    this.activeUploads++;
+    this.logger.log(`[UPLOAD] Slot acquired — activeUploads=${this.activeUploads}`);
+  }
+
+  releaseUploadSlot(): void {
+    this.activeUploads = Math.max(0, this.activeUploads - 1);
+    this.logger.log(`[UPLOAD] Slot released — activeUploads=${this.activeUploads}`);
+  }
 
   constructor(
     // MySQL pool — used only for org/plan limit checks (orgs live in MySQL)
@@ -285,11 +306,13 @@ export class PrescriptionService implements OnModuleInit {
 
   async createPrescription(params: {
     userId: string; userName: string; orgId: string | null; hospitalId: string | null;
-    patient_name: string; patient_phone: string;
+    patient_name?: string; patient_phone?: string;
     language?: string; notes?: string; imageKey?: string | null;
   }) {
-    const { userId, userName, orgId, hospitalId, patient_name, patient_phone, language, notes, imageKey } = params;
-    if (!patient_name || !patient_phone) throw AppError.badRequest('patient_name and patient_phone are required');
+    const { userId, userName, orgId, hospitalId, language, notes, imageKey } = params;
+    // Quick-upload flow sends no patient details — use placeholder so pharmacist/OCR can fill later
+    const patient_name  = params.patient_name?.trim()  || 'Quick Upload';
+    const patient_phone = params.patient_phone?.trim() || '0000000000';
 
     const id           = uuidv4();
     const access_token = crypto.randomBytes(32).toString('hex'); // 256-bit token
@@ -322,6 +345,7 @@ export class PrescriptionService implements OnModuleInit {
     const docs = await this.prescriptionModel
       .find(filter)
       .sort({ created_at: -1 })
+      .limit(100)  // safety cap — prevents returning thousands of docs in one shot
       .lean();
 
     return docs.map((d) => this.withUrls(d));
