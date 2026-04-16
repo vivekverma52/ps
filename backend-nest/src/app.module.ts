@@ -9,6 +9,7 @@ import { DatabaseModule } from './database/database.module';
 import { S3Module } from './common/s3/s3.module';
 import { SqsModule } from './common/sqs/sqs.module';
 import { LoggerModule } from './common/logger/logger.module';
+import { MetricsModule } from './common/metrics/metrics.module';
 import { MailModule } from './common/mail/mail.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { PlatformModule } from './modules/platform/platform.module';
@@ -109,6 +110,9 @@ const ALL_ENTITIES = [
 
     // Global logger
     LoggerModule,
+
+    // Prometheus metrics (/api/metrics)
+    MetricsModule,
 
     // S3 service
     S3Module,

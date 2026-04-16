@@ -256,11 +256,11 @@ Auth: `JwtAuthGuard`
 | `dosage_description` | string | Yes |
 | `common_usage` | string | Yes |
 | `drug_category` | string | Yes |
-| `alternative_medicines` | string[] | No |
+| `alternative_Exatos` | string[] | No |
 
 ---
 
-### GET /medicine-prescriptions
+### GET /Exato-prescriptions
 
 Auth: `JwtAuthGuard`
 

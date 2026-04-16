@@ -336,19 +336,38 @@ export class PrescriptionService implements OnModuleInit {
     return this.withUrls(this.toPlain(created));
   }
 
-  async listPrescriptions(params: { role: string; userId: string; orgId: string | null }) {
-    const { role, userId, orgId } = params;
+  async listPrescriptions(params: {
+    role: string; userId: string; orgId: string | null; hospitalId?: string | null;
+    page?: string; limit?: string; search?: string; status?: string;
+  }) {
+    const { role, userId, orgId, hospitalId } = params;
+    const pageNum  = Math.max(1, parseInt(params.page  || '1',  10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(params.limit || '20', 10) || 20));
+
     let filter: any = {};
-    if (role === 'DOCTOR')       filter = { doctor_id: userId };
-    else if (orgId)              filter = { org_id: orgId };
+    if (role === 'DOCTOR')           filter = { doctor_id: userId };
+    else if (role === 'PHARMACIST')  filter = hospitalId ? { hospital_id: hospitalId } : (orgId ? { org_id: orgId } : {});
+    else if (orgId)                  filter = { org_id: orgId };
 
-    const docs = await this.prescriptionModel
-      .find(filter)
-      .sort({ created_at: -1 })
-      .limit(100)  // safety cap — prevents returning thousands of docs in one shot
-      .lean();
+    if (params.search?.trim()) {
+      const safe = escapeRegex(params.search.trim());
+      filter.$or = [
+        { patient_name:  { $regex: safe, $options: 'i' } },
+        { patient_phone: { $regex: safe, $options: 'i' } },
+        { doctor_name:   { $regex: safe, $options: 'i' } },
+      ];
+    }
+    if (params.status?.trim()) {
+      filter.status = params.status.trim();
+    }
 
-    return docs.map((d) => this.withUrls(d));
+    const skip = (pageNum - 1) * limitNum;
+    const [docs, total] = await Promise.all([
+      this.prescriptionModel.find(filter).sort({ created_at: -1 }).skip(skip).limit(limitNum).lean(),
+      this.prescriptionModel.countDocuments(filter),
+    ]);
+
+    return { data: docs.map((d) => this.withUrls(d)), total, page: pageNum, limit: limitNum };
   }
 
   async getPrescriptionById(id: string, params: { role: string; userId: string; orgId: string | null }) {

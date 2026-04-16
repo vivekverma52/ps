@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -22,19 +22,41 @@ function isNew(createdAt: string) {
   return Date.now() - new Date(createdAt).getTime() < 5 * 60 * 1000
 }
 
+const PAGE_SIZE_OPTIONS = [10, 20, 50]
+
 export default function PharmacistDashboard() {
   const navigate = useNavigate()
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(20)
   const prevIdsRef = useRef<Set<string>>(new Set())
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [debouncedSearch, setDebouncedSearch] = useState('')
 
-  const fetchAll = async (silent = false) => {
+  // Debounce search input
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    searchTimerRef.current = setTimeout(() => {
+      setDebouncedSearch(search)
+      setPage(1)
+    }, 350)
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current) }
+  }, [search])
+
+  const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
     try {
-      const res = await api.get('/prescriptions')
-      const data: Prescription[] = res.data.data ?? []
+      const params: Record<string, string | number> = { page, limit }
+      if (debouncedSearch) params.search = debouncedSearch
+      if (statusFilter) params.status = statusFilter
+      const res = await api.get('/prescriptions', { params })
+      const payload = res.data.data
+      const data: Prescription[] = payload.data ?? []
+      const newTotal: number = payload.total ?? 0
 
       if (silent && prevIdsRef.current.size > 0) {
         const incoming = data.filter(p => !prevIdsRef.current.has(p.id))
@@ -44,12 +66,13 @@ export default function PharmacistDashboard() {
       }
       prevIdsRef.current = new Set(data.map(p => p.id))
       setPrescriptions(data)
+      setTotal(newTotal)
     } catch {
       if (!silent) toast.error('Failed to load prescriptions')
     } finally {
       if (!silent) setLoading(false)
     }
-  }
+  }, [page, limit, debouncedSearch, statusFilter])
 
   useEffect(() => {
     fetchAll()
@@ -57,18 +80,9 @@ export default function PharmacistDashboard() {
     const onVisible = () => { if (document.visibilityState === 'visible') fetchAll(true) }
     document.addEventListener('visibilitychange', onVisible)
     return () => { clearInterval(interval); document.removeEventListener('visibilitychange', onVisible) }
-  }, [])
+  }, [fetchAll])
 
-  const filtered = prescriptions.filter(p => {
-    const q = search.toLowerCase()
-    const matchSearch =
-      p.patient_name.toLowerCase().includes(q) ||
-      p.doctor_name.toLowerCase().includes(q) ||
-      (p.patient_phone || '').includes(q)
-    const matchStatus = !statusFilter || p.status === statusFilter
-    return matchSearch && matchStatus
-  })
-
+  const totalPages = Math.ceil(total / limit)
   const pendingCount = prescriptions.filter(p => p.status === 'UPLOADED').length
 
   const TopRight = (
@@ -93,30 +107,28 @@ export default function PharmacistDashboard() {
     <AppShell navItems={PHARMACIST_NAV} sectionLabel="Pharmacist" topBarRight={TopRight}>
 
       {/* Toolbar */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 18, alignItems: 'center' }}>
-        <div style={{ position: 'relative', flex: 1 }}>
-          <svg style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-light)', pointerEvents: 'none' }}
-            width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <div className="filter-bar" style={{ marginBottom: 18 }}>
+        <div className="filter-search">
+          <svg className="filter-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
           </svg>
           <input
             className="input-field"
-            style={{ paddingLeft: 34 }}
             placeholder="Search patient, doctor, or phone…"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
         </div>
-        <select
-          className="input-field"
-          style={{ width: 160 }}
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
-        >
+        <select className="input-field filter-select" value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1) }}>
           <option value="">All statuses</option>
           <option value="UPLOADED">Pending</option>
           <option value="RENDERED">Ready</option>
           <option value="SENT">Sent</option>
+        </select>
+        <select className="input-field filter-select-sm" value={limit} onChange={e => { setLimit(Number(e.target.value)); setPage(1) }}>
+          {PAGE_SIZE_OPTIONS.map(n => (
+            <option key={n} value={n}>{n} / page</option>
+          ))}
         </select>
       </div>
 
@@ -141,13 +153,13 @@ export default function PharmacistDashboard() {
                   <div style={{ width: 28, height: 28, border: '2px solid var(--teal)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite', margin: '0 auto' }} />
                 </td>
               </tr>
-            ) : filtered.length === 0 ? (
+            ) : prescriptions.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ textAlign: 'center', padding: '48px 0', color: 'var(--ink-light)', fontSize: 13 }}>
-                  {search || statusFilter ? 'No results match your filter' : 'No prescriptions yet — they will appear here automatically'}
+                  {debouncedSearch || statusFilter ? 'No results match your filter' : 'No prescriptions yet — they will appear here automatically'}
                 </td>
               </tr>
-            ) : filtered.map(p => (
+            ) : prescriptions.map(p => (
               <tr
                 key={p.id}
                 style={{ cursor: 'pointer', background: p.status === 'UPLOADED' && isNew(p.created_at) ? 'rgba(217,119,6,.04)' : undefined }}
@@ -188,11 +200,27 @@ export default function PharmacistDashboard() {
           </tbody>
         </table>
         </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="pagination-bar">
+            <p style={{ fontSize: 11, color: 'var(--ink-light)' }}>
+              Showing {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total}
+            </p>
+            <div className="pagination-controls">
+              <button disabled={page === 1} onClick={() => setPage(p => p - 1)}
+                className="btn btn-ghost btn-sm" style={{ opacity: page === 1 ? .4 : 1 }}>Prev</button>
+              <span style={{ fontSize: 12, color: 'var(--ink-light)' }}>{page} / {totalPages}</span>
+              <button disabled={page === totalPages} onClick={() => setPage(p => p + 1)}
+                className="btn btn-ghost btn-sm" style={{ opacity: page === totalPages ? .4 : 1 }}>Next</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {!loading && (
         <p style={{ fontSize: 11, color: 'var(--ink-light)', marginTop: 10, textAlign: 'right' }}>
-          {filtered.length} prescription{filtered.length !== 1 ? 's' : ''} · auto-refreshes every 5s
+          {total} prescription{total !== 1 ? 's' : ''} · auto-refreshes every 5s
         </p>
       )}
 

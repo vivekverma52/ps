@@ -8,6 +8,7 @@ import { AppLogger } from './common/logger/app-logger.service';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
+import { MetricsService } from './common/metrics/metrics.service';
 import { AppDataSource } from './database/data-source';
 import helmet from 'helmet';
 // compression, cookie-parser and express-mongo-sanitize ship CommonJS without a default export;
@@ -43,6 +44,7 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const logger        = app.get(AppLogger);
   const reflector     = app.get(Reflector);
+  const metrics       = app.get(MetricsService);
 
   app.useLogger(logger);
 
@@ -92,12 +94,12 @@ async function bootstrap() {
   // automatically (NestJS discards the mapped value when the response is already
   // flushed), so legacy controllers are unaffected until individually migrated.
   app.useGlobalInterceptors(
-    new LoggingInterceptor(logger),
+    new LoggingInterceptor(logger, metrics),
     new ResponseInterceptor(reflector),
   );
 
   // ── Global exception filter ────────────────────────────────────────────────
-  app.useGlobalFilters(new AllExceptionsFilter(logger));
+  app.useGlobalFilters(new AllExceptionsFilter(logger, metrics));
 
   // ── Global validation pipe ─────────────────────────────────────────────────
   app.useGlobalPipes(

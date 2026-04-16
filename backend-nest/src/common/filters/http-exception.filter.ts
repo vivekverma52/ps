@@ -9,10 +9,14 @@ import { Request, Response } from 'express';
 import { AppError } from '../errors/app.error';
 import { isMySqlError, mapMySqlError } from '../errors/db-error.util';
 import { AppLogger } from '../logger/app-logger.service';
+import { MetricsService } from '../metrics/metrics.service';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
-  constructor(private readonly logger: AppLogger) {
+  constructor(
+    private readonly logger: AppLogger,
+    private readonly metrics: MetricsService,
+  ) {
     this.logger.setContext('ExceptionFilter');
   }
 
@@ -28,6 +32,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
       path:    req.originalUrl,
       userId:  (req as any).user?.userId ?? null,
       orgId:   (req as any).user?.orgId  ?? null,
+    };
+
+    // Helper: emit alert for 5xx and record error metric
+    const recordError = (type: string, statusCode: number) => {
+      this.metrics.errorsTotal.inc({ type });
+      if (statusCode >= 500) {
+        // ALERT marker — scrape this in log aggregation for PagerDuty / Slack alerting
+        this.logger.error('ALERT: 5xx error detected', { ...base, errorType: type, statusCode });
+      }
     };
 
     // ── Multer: file too large ─────────────────────────────────────────────
@@ -107,6 +120,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
           sql:        err?.sql        ?? undefined,
         }, err?.stack);
       }
+      recordError('db', appErr.statusCode);
 
       return res.status(appErr.statusCode).json({
         success:   false,
@@ -122,6 +136,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         errorCode:  exception.errorCode,
         statusCode: exception.statusCode,
       });
+      recordError('app_error', exception.statusCode);
 
       const body: any = {
         success:   false,
@@ -143,6 +158,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ...base,
         statusCode: status,
       });
+      recordError('http_exception', status);
 
       if (typeof exRes === 'object') {
         return res.status(status).json({ success: false, ...(exRes as object) });
@@ -164,6 +180,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         mongoCode:  err.code,
         collection: err?.result?.result?.ns ?? undefined,
       }, err?.stack);
+      recordError('mongodb', HttpStatus.INTERNAL_SERVER_ERROR);
 
       // Duplicate key → surface as 409 conflict
       if (err.code === 11000) {
@@ -188,6 +205,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       errorMsg:  err?.message,
       errorCode: err?.code,
     }, err?.stack);
+    recordError('unhandled', HttpStatus.INTERNAL_SERVER_ERROR);
 
     return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       success:   false,

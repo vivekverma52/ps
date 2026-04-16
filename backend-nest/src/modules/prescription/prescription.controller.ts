@@ -139,13 +139,18 @@ export class PrescriptionsController {
 
   @Get()
   @UseGuards(JwtAuthGuard)
-  async list(@CurrentUser() user: any, @Res() res: Response) {
-    const rows = await this.prescriptionService.listPrescriptions({
+  async list(@CurrentUser() user: any, @Query() query: any, @Res() res: Response) {
+    const result = await this.prescriptionService.listPrescriptions({
       role: user.role,
       userId: user.userId,
       orgId: user.orgId,
+      hospitalId: user.hospitalId ?? null,
+      page: query.page,
+      limit: query.limit,
+      search: query.search,
+      status: query.status,
     });
-    return res.status(200).json({ success: true, data: rows });
+    return res.status(200).json({ success: true, data: result });
   }
 
   @Get('public/:token')

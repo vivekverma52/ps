@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import api from '../services/api'
@@ -19,26 +19,51 @@ interface Prescription {
   created_at: string
 }
 
+const PAGE_SIZE_OPTIONS = [10, 20, 50]
+
 export default function PrescriptionsListPage() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(20)
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Debounce search input
   useEffect(() => {
-    api.get('/prescriptions')
-      .then(r => setPrescriptions(r.data.data ?? []))
-      .catch(() => toast.error('Failed to load'))
-      .finally(() => setLoading(false))
-  }, [])
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    searchTimerRef.current = setTimeout(() => {
+      setDebouncedSearch(search)
+      setPage(1)
+    }, 350)
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current) }
+  }, [search])
 
-  const filtered = prescriptions.filter(p => {
-    const q = search.toLowerCase()
-    const matchSearch = p.patient_name.toLowerCase().includes(q) || (p.patient_phone || '').includes(q)
-    const matchStatus = !statusFilter || p.status === statusFilter
-    return matchSearch && matchStatus
-  })
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
+    try {
+      const params: Record<string, string | number> = { page, limit }
+      if (debouncedSearch) params.search = debouncedSearch
+      if (statusFilter) params.status = statusFilter
+      const r = await api.get('/prescriptions', { params })
+      const payload = r.data.data
+      setPrescriptions(payload.data ?? [])
+      setTotal(payload.total ?? 0)
+    } catch {
+      toast.error('Failed to load')
+    } finally {
+      setLoading(false)
+    }
+  }, [page, limit, debouncedSearch, statusFilter])
+
+  useEffect(() => { fetchAll() }, [fetchAll])
+
+  const totalPages = Math.ceil(total / limit)
 
   const NewBtn = (
     <button className="btn btn-teal btn-sm" onClick={() => navigate('/prescriptions/new')}>
@@ -54,39 +79,34 @@ export default function PrescriptionsListPage() {
 
       {/* Stats row */}
       <div className="grid-3" style={{ gap: 14, marginBottom: 22 }}>
-        <StatCard label="Total" value={prescriptions.length} />
+        <StatCard label="Total" value={total} />
         <StatCard label="Rendered" value={prescriptions.filter(p => p.status === 'RENDERED').length} />
         <StatCard label="Sent" value={prescriptions.filter(p => p.status === 'SENT').length} />
       </div>
 
       {/* Toolbar */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16, alignItems: 'center' }}>
-        {/* Search */}
-        <div style={{ position: 'relative', flex: 1 }}>
-          <svg style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-light)', pointerEvents: 'none' }}
-            width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <div className="filter-bar">
+        <div className="filter-search">
+          <svg className="filter-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
           </svg>
           <input
             className="input-field"
-            style={{ paddingLeft: 34 }}
             placeholder="Search by patient or phone…"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
         </div>
-
-        {/* Status filter */}
-        <select
-          className="input-field"
-          style={{ width: 160 }}
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
-        >
+        <select className="input-field filter-select" value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1) }}>
           <option value="">All statuses</option>
           <option value="UPLOADED">Uploaded</option>
           <option value="RENDERED">Rendered</option>
           <option value="SENT">Sent</option>
+        </select>
+        <select className="input-field filter-select-sm" value={limit} onChange={e => { setLimit(Number(e.target.value)); setPage(1) }}>
+          {PAGE_SIZE_OPTIONS.map(n => (
+            <option key={n} value={n}>{n} / page</option>
+          ))}
         </select>
       </div>
 
@@ -111,15 +131,15 @@ export default function PrescriptionsListPage() {
                   <div style={{ width: 28, height: 28, border: '2px solid var(--teal)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite', margin: '0 auto' }} />
                 </td>
               </tr>
-            ) : filtered.length === 0 ? (
+            ) : prescriptions.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ textAlign: 'center', padding: '48px 0', color: 'var(--ink-light)' }}>
                   <svg style={{ margin: '0 auto 12px', opacity: .3 }} width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                     <polyline points="14 2 14 8 20 8"/>
                   </svg>
-                  <p style={{ fontSize: 13 }}>{search ? 'No results found' : 'No prescriptions yet'}</p>
-                  {!search && (
+                  <p style={{ fontSize: 13 }}>{debouncedSearch || statusFilter ? 'No results found' : 'No prescriptions yet'}</p>
+                  {!debouncedSearch && !statusFilter && (
                     <button onClick={() => navigate('/prescriptions/new')}
                       style={{ fontSize: 12, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', marginTop: 6, fontFamily: 'var(--font-sans)' }}>
                       Create your first prescription →
@@ -127,7 +147,7 @@ export default function PrescriptionsListPage() {
                   )}
                 </td>
               </tr>
-            ) : filtered.map(p => (
+            ) : prescriptions.map(p => (
               <tr key={p.id}
                 style={{ cursor: 'pointer' }}
                 onClick={() => navigate(`/prescriptions/${p.access_token}`)}>
@@ -157,11 +177,27 @@ export default function PrescriptionsListPage() {
           </tbody>
         </table>
         </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="pagination-bar">
+            <p style={{ fontSize: 11, color: 'var(--ink-light)' }}>
+              Showing {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total}
+            </p>
+            <div className="pagination-controls">
+              <button disabled={page === 1} onClick={() => setPage(p => p - 1)}
+                className="btn btn-ghost btn-sm" style={{ opacity: page === 1 ? .4 : 1 }}>Prev</button>
+              <span style={{ fontSize: 12, color: 'var(--ink-light)' }}>{page} / {totalPages}</span>
+              <button disabled={page === totalPages} onClick={() => setPage(p => p + 1)}
+                className="btn btn-ghost btn-sm" style={{ opacity: page === totalPages ? .4 : 1 }}>Next</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {!loading && (
         <p style={{ fontSize: 11, color: 'var(--ink-light)', marginTop: 10, textAlign: 'right' }}>
-          {filtered.length} prescription{filtered.length !== 1 ? 's' : ''}
+          {total} prescription{total !== 1 ? 's' : ''}
           {statusFilter && ` · ${statusFilter}`}
         </p>
       )}

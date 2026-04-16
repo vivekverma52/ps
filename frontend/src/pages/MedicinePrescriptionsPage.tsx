@@ -105,7 +105,8 @@ export default function MedicinePrescriptionsPage() {
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [page, setPage] = useState(1)
-  const limit = 20
+  const [limit, setLimit] = useState(20)
+  const PAGE_SIZE_OPTIONS = [10, 20, 50]
 
   const [modal, dispatch] = useReducer(modalReducer, MODAL_CLOSED)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -147,7 +148,7 @@ export default function MedicinePrescriptionsPage() {
     }
   }
 
-  useEffect(() => { fetchMedicines() }, [page, search, categoryFilter])
+  useEffect(() => { fetchMedicines() }, [page, limit, search, categoryFilter])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -228,19 +229,23 @@ export default function MedicinePrescriptionsPage() {
     <AppShell navItems={navItems} sectionLabel={user?.role === 'PHARMACIST' ? 'Pharmacist' : undefined} topBarRight={AddBtn}>
 
       {/* Filters */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-        <div style={{ position: 'relative', flex: 1 }}>
-          <svg style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--ink-light)' }}
-            width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <div className="filter-bar">
+        <div className="filter-search">
+          <svg className="filter-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
           </svg>
-          <input className="input-field" style={{ paddingLeft: 32 }}
+          <input className="input-field"
             placeholder="Search by medicine or generic name…"
             value={search} onChange={e => { setSearch(e.target.value); setPage(1) }} />
         </div>
-        <input className="input-field" style={{ width: 220 }}
+        <input className="input-field filter-select"
           placeholder="Filter by drug category…"
           value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setPage(1) }} />
+        <select className="input-field filter-select-sm" value={limit} onChange={e => { setLimit(Number(e.target.value)); setPage(1) }}>
+          {PAGE_SIZE_OPTIONS.map(n => (
+            <option key={n} value={n}>{n} / page</option>
+          ))}
+        </select>
       </div>
 
       {/* Table */}
@@ -342,10 +347,6 @@ export default function MedicinePrescriptionsPage() {
                         style={{ fontSize: 12, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: 500 }}>
                         Edit
                       </button>
-                      <button onClick={() => setDeletingId(m._id)}
-                        style={{ fontSize: 12, color: 'var(--danger)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: 500 }}>
-                        Delete
-                      </button>
                     </div>
                   </td>
                 </tr>
@@ -356,13 +357,14 @@ export default function MedicinePrescriptionsPage() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div className="pagination-bar">
               <p style={{ fontSize: 11, color: 'var(--ink-light)' }}>
                 Showing {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total}
               </p>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div className="pagination-controls">
                 <button disabled={page === 1} onClick={() => setPage(p => p - 1)}
                   className="btn btn-ghost btn-sm" style={{ opacity: page === 1 ? .4 : 1 }}>Prev</button>
+                <span style={{ fontSize: 12, color: 'var(--ink-light)' }}>{page} / {totalPages}</span>
                 <button disabled={page === totalPages} onClick={() => setPage(p => p + 1)}
                   className="btn btn-ghost btn-sm" style={{ opacity: page === totalPages ? .4 : 1 }}>Next</button>
               </div>
@@ -391,7 +393,7 @@ export default function MedicinePrescriptionsPage() {
             </div>
 
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '65vh', overflowY: 'auto', paddingRight: 4 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div className="form-grid-2">
                 <div>
                   <label style={lbl}>Medicine Name *</label>
                   <input className="input-field" placeholder="e.g. Paracetamol 500mg"
@@ -405,7 +407,7 @@ export default function MedicinePrescriptionsPage() {
                     onChange={e => dispatch({ type: 'SET_FIELD', key: 'generic_name', value: e.target.value })} required />
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div className="form-grid-2">
                 <div>
                   <label style={lbl}>Drug Category *</label>
                   <input className="input-field" placeholder="e.g. Analgesic / Antipyretic"
@@ -446,7 +448,7 @@ export default function MedicinePrescriptionsPage() {
                   value={modal.form.salt_composition}
                   onChange={e => dispatch({ type: 'SET_FIELD', key: 'salt_composition', value: e.target.value })} />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div className="form-grid-2">
                 <div>
                   <label style={lbl}>Manufacturer Name</label>
                   <input className="input-field" placeholder="e.g. Sun Pharma"
@@ -460,7 +462,7 @@ export default function MedicinePrescriptionsPage() {
                     onChange={e => dispatch({ type: 'SET_FIELD', key: 'marketer_name', value: e.target.value })} />
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div className="form-grid-2">
                 <div>
                   <label style={lbl}>Tablet Color</label>
                   <input className="input-field" placeholder="e.g. White, Yellow"
@@ -608,17 +610,17 @@ export default function MedicinePrescriptionsPage() {
           <div
             onClick={e => e.stopPropagation()}
             style={{
-              background: 'var(--surface)', borderRadius: 16,
+              background: '#000', borderRadius: 16,
               padding: 20, maxWidth: '90vw', maxHeight: '90vh',
               display: 'flex', flexDirection: 'column', gap: 14,
               boxShadow: '0 24px 60px rgba(0,0,0,0.35)',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24 }}>
-              <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>{viewingImage.name}</p>
+              <p style={{ fontSize: 14, fontWeight: 600, color: '#fff', margin: 0 }}>{viewingImage.name}</p>
               <button
                 onClick={() => setViewingImage(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-light)', display: 'flex', padding: 2 }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.6)', display: 'flex', padding: 2 }}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>

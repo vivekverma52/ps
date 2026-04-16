@@ -1,4 +1,5 @@
 import { Injectable, LoggerService, Scope } from '@nestjs/common';
+import { requestContextStorage } from '../context/request-context';
 
 export interface LogContext {
   requestId?: string;
@@ -56,12 +57,17 @@ export class AppLogger implements LoggerService {
   // ── Builder ────────────────────────────────────────────────────────────
 
   private build(level: string, message: string, ctx?: LogContext | string): Record<string, any> {
+    // Automatically pick up traceId from AsyncLocalStorage if available.
+    const reqCtx = requestContextStorage.getStore();
+
     const entry: Record<string, any> = {
       timestamp: new Date().toISOString(),
       level,
       context: this.context ?? 'App',
       message,
     };
+
+    if (reqCtx?.traceId) entry.traceId = reqCtx.traceId;
 
     if (typeof ctx === 'string') {
       // NestJS internal calls pass context as second arg string

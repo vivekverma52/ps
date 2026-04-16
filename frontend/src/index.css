@@ -298,11 +298,42 @@ body {
 .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .table-scroll .data-table { min-width: 560px; }
 
+/* ── Filter / toolbar bar ───────────────────────────────────────────────────── */
+.filter-bar {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  margin-bottom: 16px; align-items: center;
+}
+.filter-search { flex: 1; min-width: 180px; position: relative; }
+.filter-search .input-field { padding-left: 34px; }
+.filter-search-icon {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  color: var(--ink-light); pointer-events: none;
+}
+.filter-select     { width: 160px; flex-shrink: 0; }
+.filter-select-sm  { width: 110px; flex-shrink: 0; }
+
+/* ── 2-col form grid (collapses on mobile) ──────────────────────────────────── */
+.form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* ── 2-col page layout (collapses on mobile) ────────────────────────────────── */
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+
+/* ── 3-col info row (collapses on mobile) ───────────────────────────────────── */
+.info-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+
+/* ── Pagination bar ─────────────────────────────────────────────────────────── */
+.pagination-bar {
+  padding: 10px 16px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px;
+}
+.pagination-controls { display: flex; align-items: center; gap: 8px; }
+
 /* ── Hamburger button (hidden on desktop) ──────────────────────────────────── */
 .mobile-menu-btn {
   display: none;
   align-items: center; justify-content: center;
-  width: 34px; height: 34px; border-radius: 8px;
+  width: 36px; height: 36px; border-radius: 8px;
   background: none; border: 1.5px solid var(--border-mid);
   cursor: pointer; color: var(--ink); flex-shrink: 0;
 }
@@ -315,7 +346,7 @@ body {
   z-index: 39;
 }
 
-/* ── Mobile breakpoint ─────────────────────────────────────────────────────── */
+/* ── Mobile breakpoint (≤ 767px) ───────────────────────────────────────────── */
 @media (max-width: 767px) {
   /* App shell */
   .app-sidebar {
@@ -323,34 +354,49 @@ body {
     transition: transform .25s ease;
     z-index: 50;
   }
-  .app-sidebar.sidebar-open {
-    transform: translateX(0);
-  }
-  .sidebar-overlay.sidebar-open {
-    display: block;
-  }
-  .app-main {
-    margin-left: 0;
-  }
-  .app-topbar {
-    padding: 0 16px;
-  }
-  .app-content {
-    padding: 16px;
-  }
-  .mobile-menu-btn {
-    display: flex;
-  }
+  .app-sidebar.sidebar-open { transform: translateX(0); }
+  .sidebar-overlay.sidebar-open { display: block; }
+  .app-main { margin-left: 0; }
+  .app-topbar { padding: 0 12px; gap: 8px; }
+  .app-content { padding: 14px; }
+  .mobile-menu-btn { display: flex; }
 
-  /* Grids → single column */
+  /* Stat grids → single column */
   .grid-3 { grid-template-columns: 1fr; }
   .grid-2 { grid-template-columns: 1fr; }
 
-  /* Stat card value smaller on mobile */
+  /* Stat card value smaller */
   .stat-card-value { font-size: 28px; }
+  .stat-card { padding: 14px 16px; }
 
-  /* Modal full width on small screens */
-  .modal-box { padding: 20px; border-radius: 14px; }
+  /* Modal: full-width sheet */
+  .modal-overlay { padding: 12px; align-items: flex-end; }
+  .modal-box {
+    padding: 20px; border-radius: 18px 18px 10px 10px;
+    max-height: 90vh; overflow-y: auto;
+  }
+
+  /* Layout grids → single column */
+  .form-grid-2  { grid-template-columns: 1fr; }
+  .detail-grid  { grid-template-columns: 1fr; }
+  .info-grid-3  { grid-template-columns: 1fr 1fr; }
+
+  /* Filter bar: search takes full width, selects share row */
+  .filter-search { flex-basis: 100%; min-width: 0; }
+  .filter-select    { flex: 1; width: auto; min-width: 0; }
+  .filter-select-sm { flex: 1; width: auto; min-width: 0; }
+
+  /* Pagination bar: center on mobile */
+  .pagination-bar { justify-content: center; }
+
+  /* Touch-friendly tap targets */
+  .btn { min-height: 40px; }
+  .btn-sm { min-height: 34px; }
+  .input-field { min-height: 42px; }
+
+  /* Table cells: tighter on mobile */
+  .data-table td { padding: 10px 12px; font-size: 12.5px; }
+  .data-table th { padding: 8px 12px; }
 
   /* Dark shell sidebar */
   .dark-sidebar {
@@ -358,12 +404,18 @@ body {
     transition: transform .25s ease;
     z-index: 50;
   }
-  .dark-sidebar.sidebar-open {
-    transform: translateX(0);
-  }
+  .dark-sidebar.sidebar-open { transform: translateX(0); }
 }
 
-/* Tablet: 2-col stat grids on medium screens */
+/* ── Tablet (480px – 767px): 2-col stat grid ───────────────────────────────── */
 @media (min-width: 480px) and (max-width: 767px) {
   .grid-3 { grid-template-columns: 1fr 1fr; }
+}
+
+/* ── Very small screens (≤ 380px) ──────────────────────────────────────────── */
+@media (max-width: 380px) {
+  .app-content { padding: 10px; }
+  .info-grid-3 { grid-template-columns: 1fr; }
+  .filter-select, .filter-select-sm { flex-basis: 100%; }
+  .modal-box { padding: 16px; }
 }

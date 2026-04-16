@@ -204,7 +204,7 @@ function MedicineForm({
       </div>
 
       {/* Quantity + Course */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+      <div className="form-grid-2">
         <div>
           <label style={lbl}>Quantity per Day *</label>
           <input style={field} type="number" min="1" max="10" value={form.quantity}
@@ -400,7 +400,7 @@ function OcrMedicineForm({ initial, onSave, onCancel }: {
       </div>
 
       {/* Dosage + Duration */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+      <div className="form-grid-2">
         <div>
           <label style={lbl}>Dosage</label>
           <input style={field} value={form.dosage} onChange={setField('dosage')} placeholder="e.g. 1 tablet" />
@@ -753,7 +753,7 @@ export default function PharmacistPrescriptionDetail() {
             <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Dr. {prescription.doctor_name}</p>
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+        <div className="info-grid-3">
           {[
             ['Language', prescription.language],
             ['Date', new Date(prescription.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })],
@@ -768,7 +768,7 @@ export default function PharmacistPrescriptionDetail() {
       </div>
 
       {/* ── Main grid ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+      <div className="detail-grid">
 
         {/* LEFT col: image + actions + qr */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -797,7 +797,7 @@ export default function PharmacistPrescriptionDetail() {
           {/* Actions */}
           <div className="card" style={{ padding: '16px 18px' }}>
             <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: 'var(--ink-light)', marginBottom: 12 }}>Actions</p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            <div className="info-grid-3">
               <button onClick={handleRender} disabled={rendering} style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7,
                 padding: '14px 8px', borderRadius: 10, border: 'none', cursor: rendering ? 'not-allowed' : 'pointer',
@@ -991,7 +991,7 @@ export default function PharmacistPrescriptionDetail() {
                       </div>
                     </div>
                   ) : (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+                    <div className="form-grid-2" style={{ marginTop: 8 }}>
                       <div>
                         <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 2 }}>Name</p>
                         <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{prescription.patient_name}</p>
@@ -1006,7 +1006,7 @@ export default function PharmacistPrescriptionDetail() {
 
                 {/* Hospital + Doctor */}
                 {(hospital?.name || doctor?.name) && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                  <div className="form-grid-2" style={{ marginBottom: 12 }}>
                     {hospital?.name && (
                       <div style={{ background: 'var(--cell)', borderRadius: 8, padding: '8px 10px' }}>
                         <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 2 }}>Hospital</p>

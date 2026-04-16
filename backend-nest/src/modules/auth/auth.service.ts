@@ -18,6 +18,14 @@ function slugify(str: string): string {
   );
 }
 
+/** Mask email to avoid logging PII — e.g. "john.doe@example.com" → "jo***@example.com" */
+function maskEmail(email: string): string {
+  const [local, domain] = email.split('@');
+  if (!domain) return '***';
+  const visible = local.length > 2 ? local.slice(0, 2) : local.slice(0, 1);
+  return `${visible}***@${domain}`;
+}
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -82,14 +90,14 @@ export class AuthService {
   // ── Superadmin login ───────────────────────────────────────────────────
 
   async superadminLogin(email: string, password: string) {
-    this.logger.log(`[superadminLogin] attempt email=${email}`);
+    this.logger.log(`[superadminLogin] attempt email=${maskEmail(email)}`);
     if (!email || !password) throw AppError.badRequest('Email and password are required');
 
     const sa = await this.authRepository.findSuperadminByEmail(email.trim().toLowerCase());
-    if (!sa) { this.logger.warn(`[superadminLogin] not found email=${email}`); throw AppError.unauthorized('Invalid credentials'); }
+    if (!sa) { this.logger.warn(`[superadminLogin] not found email=${maskEmail(email)}`); throw AppError.unauthorized('Invalid credentials'); }
 
     const valid = await bcrypt.compare(password, sa.password);
-    if (!valid) { this.logger.warn(`[superadminLogin] wrong password email=${email}`); throw AppError.unauthorized('Invalid credentials'); }
+    if (!valid) { this.logger.warn(`[superadminLogin] wrong password email=${maskEmail(email)}`); throw AppError.unauthorized('Invalid credentials'); }
 
     const token = jwt.sign(
       { type: 'SUPERADMIN', superAdminId: sa.id, name: sa.name, email: sa.email },
@@ -104,7 +112,7 @@ export class AuthService {
 
 
   async register(body: { name: string; email: string; password: string; role?: string; clinic_name?: string }) {
-    this.logger.log(`[register] email=${body.email} role=${body.role}`);
+    this.logger.log(`[register] email=${maskEmail(body.email)} role=${body.role}`);
     const { name, email, password, role = 'DOCTOR', clinic_name } = body;
 
     if (!name || !email || !password) throw AppError.badRequest('Name, email and password are required');
@@ -224,11 +232,11 @@ export class AuthService {
   // ── Login ──────────────────────────────────────────────────────────────
 
   async login(email: string, password: string) {
-    this.logger.log(`[login] attempt email=${email}`);
+    this.logger.log(`[login] attempt email=${maskEmail(email)}`);
     if (!email || !password) throw AppError.badRequest('Email and password are required');
 
     const user = await this.authRepository.findUserByEmail(email.trim().toLowerCase());
-    if (!user) { this.logger.warn(`[login] user not found email=${email}`); throw AppError.unauthorized('Invalid email or password'); }
+    if (!user) { this.logger.warn(`[login] user not found email=${maskEmail(email)}`); throw AppError.unauthorized('Invalid email or password'); }
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) { this.logger.warn(`[login] wrong password userId=${user.id}`); throw AppError.unauthorized('Invalid email or password'); }
@@ -310,7 +318,7 @@ export class AuthService {
   // ── Forgot password ────────────────────────────────────────────────────
 
   async forgotPassword(email: string) {
-    this.logger.log(`[forgotPassword] request for email=${email}`);
+    this.logger.log(`[forgotPassword] request for email=${maskEmail(email)}`);
     const normalEmail = email.trim().toLowerCase();
 
     // Always return same message — never reveal whether the email exists
@@ -348,7 +356,7 @@ export class AuthService {
   // ── Reset password (OTP-based) ─────────────────────────────────────────
 
   async resetPassword(email: string, otp: string, newPassword: string) {
-    this.logger.log(`[resetPassword] attempt email=${email}`);
+    this.logger.log(`[resetPassword] attempt email=${maskEmail(email)}`);
     const normalEmail = email.trim().toLowerCase();
     const otpHash     = crypto.createHash('sha256').update(otp.trim()).digest('hex');
 
