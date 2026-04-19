@@ -18,6 +18,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { CreateHospitalMemberDto } from './dto/create-hospital-member.dto';
 import { UpdateDoctorProfileDto } from './dto/update-doctor-profile.dto';
 import { UpdatePharmacistProfileDto } from './dto/update-pharmacist-profile.dto';
+import { AuthenticatedUser } from '../../common/types/authenticated-user.interface';
 
 // ── Hospitals Controller ──────────────────────────────────────────────────────
 
@@ -27,59 +28,59 @@ export class HospitalsController {
   constructor(private readonly hospitalService: HospitalService) {}
 
   @Get()
-  findAll(@CurrentUser() user: any) {
+  findAll(@CurrentUser() user: AuthenticatedUser) {
     return this.hospitalService.listHospitals(user.orgId);
   }
 
   @Get(':id')
-  findOne(@CurrentUser() user: any, @Param('id') id: string) {
+  findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.hospitalService.getHospitalById(user.orgId, id);
   }
 
   @Get(':id/staff')
-  getStaff(@CurrentUser() user: any, @Param('id') id: string) {
+  getStaff(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.hospitalService.getStaff(user.orgId, id);
   }
 
   @Post()
   @UseGuards(OrgAdminGuard)
-  create(@CurrentUser() user: any, @Body() dto: CreateHospitalDto) {
+  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateHospitalDto) {
     return this.hospitalService.createHospital(user.orgId, dto);
   }
 
   @Put(':id')
   @UseGuards(OrgAdminGuard)
-  update(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: UpdateHospitalDto) {
+  update(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateHospitalDto) {
     return this.hospitalService.updateHospital(user.orgId, id, dto);
   }
 
   @Delete(':id')
   @UseGuards(OrgAdminGuard)
-  remove(@CurrentUser() user: any, @Param('id') id: string) {
+  remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.hospitalService.removeHospital(user.orgId, id);
   }
 
   @Put(':id/address')
   @UseGuards(OrgAdminGuard)
-  upsertAddress(@CurrentUser() user: any, @Param('id') id: string, @Body() dto: UpsertAddressDto) {
+  upsertAddress(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpsertAddressDto) {
     return this.hospitalService.upsertAddress(user.orgId, id, dto);
   }
 
   @Post(':id/members')
   @UseGuards(OrgAdminGuard)
-  createMember(@CurrentUser() user: any, @Param('id') id: string, @Body() body: CreateHospitalMemberDto) {
+  createMember(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() body: CreateHospitalMemberDto) {
     return this.hospitalService.createMemberForHospital(user.orgId, id, body);
   }
 
   @Post(':id/staff')
   @UseGuards(OrgAdminGuard)
-  assignStaff(@CurrentUser() user: any, @Param('id') id: string, @Body() body: { user_id: string }) {
+  assignStaff(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() body: { user_id: string }) {
     return this.hospitalService.assignStaffToHospital(user.orgId, id, body.user_id);
   }
 
   @Delete(':id/staff/:userId')
   @UseGuards(OrgAdminGuard)
-  removeStaff(@CurrentUser() user: any, @Param('id') id: string, @Param('userId') userId: string) {
+  removeStaff(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Param('userId') userId: string) {
     return this.hospitalService.removeStaffFromHospital(user.orgId, id, userId);
   }
 }
@@ -92,12 +93,12 @@ export class DoctorProfilesController {
   constructor(private readonly hospitalService: HospitalService) {}
 
   @Get('me')
-  getMyProfile(@CurrentUser() user: any) {
+  getMyProfile(@CurrentUser() user: AuthenticatedUser) {
     return this.hospitalService.getDoctorProfile(user.userId);
   }
 
   @Put('me')
-  updateMyProfile(@CurrentUser() user: any, @Body() dto: UpdateDoctorProfileDto) {
+  updateMyProfile(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateDoctorProfileDto) {
     return this.hospitalService.updateDoctorProfile(user.userId, dto);
   }
 
@@ -116,12 +117,12 @@ export class PharmacistProfilesController {
   constructor(private readonly hospitalService: HospitalService) {}
 
   @Get('me')
-  getMyProfile(@CurrentUser() user: any) {
+  getMyProfile(@CurrentUser() user: AuthenticatedUser) {
     return this.hospitalService.getPharmacistProfile(user.userId);
   }
 
   @Put('me')
-  updateMyProfile(@CurrentUser() user: any, @Body() dto: UpdatePharmacistProfileDto) {
+  updateMyProfile(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdatePharmacistProfileDto) {
     return this.hospitalService.updatePharmacistProfile(user.userId, dto);
   }
 

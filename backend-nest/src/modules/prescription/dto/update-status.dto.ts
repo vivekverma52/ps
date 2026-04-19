@@ -1,6 +1,6 @@
 import { IsIn, IsString } from 'class-validator';
 
-const VALID_STATUSES = ['UPLOADED', 'RENDERED', 'SENT'] as const;
+const VALID_STATUSES = ['UPLOADED', 'CLAIMED', 'PROCESSING', 'RENDERED', 'SENT'] as const;
 
 export class UpdateStatusDto {
   @IsString()

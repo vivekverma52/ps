@@ -163,9 +163,10 @@ export class PrescriptionsController {
   @UseGuards(JwtAuthGuard)
   async getById(@Param('id') id: string, @CurrentUser() user: any, @Res() res: Response) {
     const prescription = await this.prescriptionService.getPrescriptionById(id, {
-      role: user.role,
-      userId: user.userId,
-      orgId: user.orgId,
+      role:       user.role,
+      userId:     user.userId,
+      orgId:      user.orgId,
+      hospitalId: user.hospitalId ?? null,
     });
     return res.status(200).json({ success: true, data: prescription });
   }
@@ -179,7 +180,10 @@ export class PrescriptionsController {
     @Res() res: Response,
   ) {
     const result = await this.prescriptionService.getVideoDownloadUrl(id, {
-      role: user.role, userId: user.userId, orgId: user.orgId ?? null,
+      role:       user.role,
+      userId:     user.userId,
+      orgId:      user.orgId      ?? null,
+      hospitalId: user.hospitalId ?? null,
     });
     return res.status(200).json({ success: true, data: result });
   }
@@ -194,7 +198,12 @@ export class PrescriptionsController {
     @Res() res: Response,
   ) {
     this.logger.log(`[RENDER] Triggered by userId=${user.userId} role=${user.role} prescriptionId=${id}`);
-    const prescription = await this.prescriptionService.updateRender(id, user.userId, body.video_url);
+    const prescription = await this.prescriptionService.updateRender(id, {
+      role:       user.role,
+      userId:     user.userId,
+      orgId:      user.orgId      ?? null,
+      hospitalId: user.hospitalId ?? null,
+    }, body.video_url);
     this.logger.log(`[RENDER] Complete prescriptionId=${id} status=${prescription?.status}`);
     return res.status(200).json({ success: true, message: 'Prescription updated', data: prescription });
   }
@@ -209,7 +218,12 @@ export class PrescriptionsController {
     @Res() res: Response,
   ) {
     this.logger.log(`[PATIENT:UPDATE] userId=${user.userId} prescriptionId=${id}`);
-    const result = await this.prescriptionService.updatePatientDetails(id, user.orgId, body);
+    const result = await this.prescriptionService.updatePatientDetails(id, {
+      role:       user.role,
+      userId:     user.userId,
+      orgId:      user.orgId      ?? null,
+      hospitalId: user.hospitalId ?? null,
+    }, body);
     return res.status(200).json({ success: true, message: 'Patient details updated', data: result });
   }
 
@@ -223,10 +237,11 @@ export class PrescriptionsController {
     @Res() res: Response,
   ) {
     const result = await this.prescriptionService.updateStatus(id, {
-      userId: user.userId,
-      role: user.role,
-      orgId: user.orgId,
-      status: body.status,
+      userId:     user.userId,
+      role:       user.role,
+      orgId:      user.orgId      ?? null,
+      hospitalId: user.hospitalId ?? null,
+      status:     body.status,
     });
     return res.status(200).json({ success: true, message: result.message, data: result });
   }
@@ -236,10 +251,16 @@ export class PrescriptionsController {
   @Roles('DOCTOR', 'PHARMACIST')
   async saveInterpretedData(
     @Param('id') id: string,
+    @CurrentUser() user: any,
     @Body() body: SaveInterpretedDataDto,
     @Res() res: Response,
   ) {
-    const result = await this.prescriptionService.saveInterpretedData(id, body);
+    const result = await this.prescriptionService.saveInterpretedData(id, body, {
+      role:       user.role,
+      userId:     user.userId,
+      orgId:      user.orgId      ?? null,
+      hospitalId: user.hospitalId ?? null,
+    });
     return res.status(200).json({ success: true, message: result.message });
   }
 
@@ -259,8 +280,13 @@ export class PrescriptionsController {
     @Body() body: AddMedicineDto,
     @Res() res: Response,
   ) {
-    this.logger.log(`[MEDICINE:ADD] pharmacist=${user.userId} orgId=${user.orgId} prescriptionId=${id} medicine="${body.name}"`);
-    const result = await this.prescriptionService.addMedicineToRx(id, user.orgId, body);
+    this.logger.log(`[MEDICINE:ADD] pharmacist=${user.userId} orgId=${user.orgId} hospitalId=${user.hospitalId} prescriptionId=${id} medicine="${body.name}"`);
+    const result = await this.prescriptionService.addMedicineToRx(id, {
+      role:       user.role,
+      userId:     user.userId,
+      orgId:      user.orgId      ?? null,
+      hospitalId: user.hospitalId ?? null,
+    }, body);
     this.logger.log(`[MEDICINE:ADD] Success — medId=${result.id} prescriptionId=${id}`);
     return res.status(201).json({ success: true, message: 'Medicine added', data: result });
   }
@@ -275,8 +301,13 @@ export class PrescriptionsController {
     @Body() body: UpdateMedicineDto,
     @Res() res: Response,
   ) {
-    this.logger.log(`[MEDICINE:UPDATE] pharmacist=${user.userId} orgId=${user.orgId} prescriptionId=${id} medId=${medId}`);
-    const result = await this.prescriptionService.updateMedicineInRx(id, medId, user.orgId, body);
+    this.logger.log(`[MEDICINE:UPDATE] pharmacist=${user.userId} orgId=${user.orgId} hospitalId=${user.hospitalId} prescriptionId=${id} medId=${medId}`);
+    const result = await this.prescriptionService.updateMedicineInRx(id, medId, {
+      role:       user.role,
+      userId:     user.userId,
+      orgId:      user.orgId      ?? null,
+      hospitalId: user.hospitalId ?? null,
+    }, body);
     this.logger.log(`[MEDICINE:UPDATE] Success — medId=${medId} prescriptionId=${id}`);
     return res.status(200).json({ success: true, message: 'Medicine updated', data: result });
   }
@@ -290,8 +321,13 @@ export class PrescriptionsController {
     @CurrentUser() user: any,
     @Res() res: Response,
   ) {
-    this.logger.log(`[MEDICINE:DELETE] pharmacist=${user.userId} orgId=${user.orgId} prescriptionId=${id} medId=${medId}`);
-    await this.prescriptionService.deleteMedicineFromRx(id, medId, user.orgId);
+    this.logger.log(`[MEDICINE:DELETE] pharmacist=${user.userId} orgId=${user.orgId} hospitalId=${user.hospitalId} prescriptionId=${id} medId=${medId}`);
+    await this.prescriptionService.deleteMedicineFromRx(id, medId, {
+      role:       user.role,
+      userId:     user.userId,
+      orgId:      user.orgId      ?? null,
+      hospitalId: user.hospitalId ?? null,
+    });
     this.logger.log(`[MEDICINE:DELETE] Success — medId=${medId} prescriptionId=${id}`);
     return res.status(200).json({ success: true, message: 'Medicine removed', data: null });
   }

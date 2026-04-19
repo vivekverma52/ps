@@ -7,28 +7,17 @@ import {
   Param,
   Body,
   Query,
-  Res,
+  HttpCode,
   UseGuards,
 } from '@nestjs/common';
-import { IsOptional, IsString } from 'class-validator';
-
-class ListOrgsQueryDto {
-  @IsOptional() @IsString() search?: string;
-  @IsOptional() @IsString() plan?: string;
-  @IsOptional() @IsString() status?: string;
-}
-
-class ListUsersQueryDto {
-  @IsOptional() @IsString() search?: string;
-  @IsOptional() @IsString() org_id?: string;
-}
-import { Response } from 'express';
 import { PlatformService } from './platform.service';
 import { CreatePlanDto } from './dto/create-plan.dto';
 import { CreateOrgDto } from './dto/create-org.dto';
 import { UpdateOrgDto } from './dto/update-org.dto';
+import { ListOrgsQueryDto } from './dto/list-orgs-query.dto';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { SuperAdminAuthGuard } from '../../common/guards/superadmin-auth.guard';
-import { AppError } from '../../common/errors/app.error';
+import { HttpMessage } from '../../common/decorators/message.decorator';
 
 // ── Superadmin Controller ─────────────────────────────────────────────────────
 
@@ -38,48 +27,42 @@ export class SuperadminController {
   constructor(private readonly platformService: PlatformService) {}
 
   @Get('dashboard')
-  async getDashboard(@Res() res: Response) {
-    const data = await this.platformService.getDashboard();
-    return res.status(200).json({ success: true, data });
+  getDashboard() {
+    return this.platformService.getDashboard();
   }
 
   @Get('organizations')
-  async listOrgs(@Query() query: ListOrgsQueryDto, @Res() res: Response) {
-    const orgs = await this.platformService.listOrgs(query);
-    return res.status(200).json({ success: true, data: orgs });
+  listOrgs(@Query() query: ListOrgsQueryDto) {
+    return this.platformService.listOrgs(query);
   }
 
   @Post('organizations')
-  async createOrg(@Body() body: CreateOrgDto, @Res() res: Response) {
-    const result = await this.platformService.createOrg(body);
-    return res.status(201).json({ success: true, message: 'Organization created', data: result });
+  @HttpCode(201)
+  @HttpMessage('Organization created')
+  createOrg(@Body() body: CreateOrgDto) {
+    return this.platformService.createOrg(body);
   }
 
   @Get('organizations/:id')
-  async getOrgDetail(@Param('id') id: string, @Res() res: Response) {
-    if (!id) throw AppError.badRequest('Organization ID is required');
-    const org = await this.platformService.getOrgDetail(id);
-    return res.status(200).json({ success: true, data: org });
+  getOrgDetail(@Param('id') id: string) {
+    return this.platformService.getOrgDetail(id);
   }
 
   @Put('organizations/:id')
-  async updateOrg(@Param('id') id: string, @Body() body: UpdateOrgDto, @Res() res: Response) {
-    if (!id) throw AppError.badRequest('Organization ID is required');
-    const org = await this.platformService.updateOrg(id, body);
-    return res.status(200).json({ success: true, message: 'Organization updated', data: org });
+  @HttpMessage('Organization updated')
+  updateOrg(@Param('id') id: string, @Body() body: UpdateOrgDto) {
+    return this.platformService.updateOrg(id, body);
   }
 
   @Delete('organizations/:id')
-  async deleteOrg(@Param('id') id: string, @Res() res: Response) {
-    if (!id) throw AppError.badRequest('Organization ID is required');
-    await this.platformService.deleteOrg(id);
-    return res.status(200).json({ success: true, message: 'Organization deleted', data: null });
+  @HttpMessage('Organization deleted')
+  deleteOrg(@Param('id') id: string) {
+    return this.platformService.deleteOrg(id);
   }
 
   @Get('users')
-  async listUsers(@Query() query: ListUsersQueryDto, @Res() res: Response) {
-    const users = await this.platformService.listUsers(query);
-    return res.status(200).json({ success: true, data: users });
+  listUsers(@Query() query: ListUsersQueryDto) {
+    return this.platformService.listUsers(query);
   }
 }
 

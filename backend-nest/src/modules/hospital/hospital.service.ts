@@ -8,10 +8,23 @@ import { v4 as uuidv4 } from 'uuid';
 import * as bcrypt from 'bcryptjs';
 import { MYSQL_POOL } from '../../database/database.module';
 import { AppError } from '../../common/errors/app.error';
-import { HospitalRepository } from './hospital.repository';
+
+const PASSWORD_MIN_LENGTH = 6;
 
 function slugify(name: string): string {
   return name.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-');
+}
+
+function buildDynamicUpdate(dto: Record<string, any>, columnMap: Record<string, string>): { fields: string[]; values: any[] } {
+  const fields: string[] = [];
+  const values: any[]    = [];
+  for (const [key, col] of Object.entries(columnMap)) {
+    if (dto[key] !== undefined) {
+      fields.push(`${col} = ?`);
+      values.push(dto[key]);
+    }
+  }
+  return { fields, values };
 }
 
 @Injectable()
@@ -20,7 +33,6 @@ export class HospitalService {
 
   constructor(
     @Inject(MYSQL_POOL) private readonly pool: Pool,
-    private readonly hospitalRepository: HospitalRepository,
   ) {}
 
   // ── Helpers ────────────────────────────────────────────────────────────
@@ -76,8 +88,8 @@ export class HospitalService {
     if (!dto.city?.trim())         throw AppError.badRequest('City is required');
     if (!dto.admin_name?.trim())   throw AppError.badRequest('Admin name is required');
     if (!dto.admin_email?.trim())  throw AppError.badRequest('Admin email is required');
-    if (!dto.admin_password || dto.admin_password.length < 6)
-      throw AppError.badRequest('Admin password must be at least 6 characters');
+    if (!dto.admin_password || dto.admin_password.length < PASSWORD_MIN_LENGTH)
+      throw AppError.badRequest(`Admin password must be at least ${PASSWORD_MIN_LENGTH} characters`);
 
     // Bcrypt is CPU-bound — compute before entering the transaction so we don't
     // hold a DB connection open during the ~100 ms hash operation.
@@ -209,15 +221,10 @@ export class HospitalService {
 
   async updateHospital(orgId: string, hospitalId: string, dto: { name?: string; phone?: string; email?: string; status?: 'ACTIVE' | 'SUSPENDED' }) {
     await this.assertBelongsToOrg(hospitalId, orgId);
-    const fields: string[] = [];
-    const values: any[]    = [];
-    if (dto.name   !== undefined) { fields.push('name = ?');   values.push(dto.name.trim()); }
-    if (dto.phone  !== undefined) { fields.push('phone = ?');  values.push(dto.phone); }
-    if (dto.email  !== undefined) { fields.push('email = ?');  values.push(dto.email); }
-    if (dto.status !== undefined) { fields.push('status = ?'); values.push(dto.status); }
+    const trimmed = dto.name !== undefined ? { ...dto, name: dto.name.trim() } : dto;
+    const { fields, values } = buildDynamicUpdate(trimmed, { name: 'name', phone: 'phone', email: 'email', status: 'status' });
     if (fields.length === 0) throw AppError.badRequest('No fields to update');
-    values.push(hospitalId);
-    await this.pool.execute(`UPDATE hospitals SET ${fields.join(', ')} WHERE id = ?`, values);
+    await this.pool.execute(`UPDATE hospitals SET ${fields.join(', ')} WHERE id = ?`, [...values, hospitalId]);
     return this.getHospitalById(orgId, hospitalId);
   }
 
@@ -277,18 +284,12 @@ export class HospitalService {
     );
 
     if (existing.length > 0) {
-      const fields: string[] = [];
-      const values: any[]    = [];
-      if (dto.address_line1 !== undefined) { fields.push('address_line1 = ?'); values.push(dto.address_line1); }
-      if (dto.address_line2 !== undefined) { fields.push('address_line2 = ?'); values.push(dto.address_line2); }
-      if (dto.city          !== undefined) { fields.push('city = ?');          values.push(dto.city); }
-      if (dto.state         !== undefined) { fields.push('state = ?');         values.push(dto.state); }
-      if (dto.pincode       !== undefined) { fields.push('pincode = ?');       values.push(dto.pincode); }
-      if (dto.lat           !== undefined) { fields.push('lat = ?');           values.push(dto.lat); }
-      if (dto.lng           !== undefined) { fields.push('lng = ?');           values.push(dto.lng); }
+      const { fields, values } = buildDynamicUpdate(dto, {
+        address_line1: 'address_line1', address_line2: 'address_line2',
+        city: 'city', state: 'state', pincode: 'pincode', lat: 'lat', lng: 'lng',
+      });
       if (fields.length > 0) {
-        values.push(hospitalId);
-        await this.pool.execute(`UPDATE hospital_addresses SET ${fields.join(', ')} WHERE hospital_id = ?`, values);
+        await this.pool.execute(`UPDATE hospital_addresses SET ${fields.join(', ')} WHERE hospital_id = ?`, [...values, hospitalId]);
       }
     } else {
       await this.pool.execute(
@@ -347,16 +348,12 @@ export class HospitalService {
 
   async updateDoctorProfile(userId: string, dto: { hospital_id?: string; role_id?: string; specialization?: string; license_number?: string; registration_number?: string }) {
     await this.getDoctorProfile(userId);
-    const fields: string[] = [];
-    const values: any[]    = [];
-    if (dto.hospital_id         !== undefined) { fields.push('hospital_id = ?');         values.push(dto.hospital_id); }
-    if (dto.role_id             !== undefined) { fields.push('role_id = ?');             values.push(dto.role_id); }
-    if (dto.specialization      !== undefined) { fields.push('specialization = ?');      values.push(dto.specialization); }
-    if (dto.license_number      !== undefined) { fields.push('license_number = ?');      values.push(dto.license_number); }
-    if (dto.registration_number !== undefined) { fields.push('registration_number = ?'); values.push(dto.registration_number); }
+    const { fields, values } = buildDynamicUpdate(dto, {
+      hospital_id: 'hospital_id', role_id: 'role_id', specialization: 'specialization',
+      license_number: 'license_number', registration_number: 'registration_number',
+    });
     if (fields.length === 0) throw AppError.badRequest('No fields to update');
-    values.push(userId);
-    await this.pool.execute(`UPDATE doctor_profiles SET ${fields.join(', ')} WHERE user_id = ?`, values);
+    await this.pool.execute(`UPDATE doctor_profiles SET ${fields.join(', ')} WHERE user_id = ?`, [...values, userId]);
     return this.getDoctorProfile(userId);
   }
 
@@ -378,15 +375,12 @@ export class HospitalService {
 
   async updatePharmacistProfile(userId: string, dto: { hospital_id?: string; role_id?: string; license_number?: string; pharmacy_registration?: string }) {
     await this.getPharmacistProfile(userId);
-    const fields: string[] = [];
-    const values: any[]    = [];
-    if (dto.hospital_id           !== undefined) { fields.push('hospital_id = ?');           values.push(dto.hospital_id); }
-    if (dto.role_id               !== undefined) { fields.push('role_id = ?');               values.push(dto.role_id); }
-    if (dto.license_number        !== undefined) { fields.push('license_number = ?');        values.push(dto.license_number); }
-    if (dto.pharmacy_registration !== undefined) { fields.push('pharmacy_registration = ?'); values.push(dto.pharmacy_registration); }
+    const { fields, values } = buildDynamicUpdate(dto, {
+      hospital_id: 'hospital_id', role_id: 'role_id',
+      license_number: 'license_number', pharmacy_registration: 'pharmacy_registration',
+    });
     if (fields.length === 0) throw AppError.badRequest('No fields to update');
-    values.push(userId);
-    await this.pool.execute(`UPDATE pharmacist_profiles SET ${fields.join(', ')} WHERE user_id = ?`, values);
+    await this.pool.execute(`UPDATE pharmacist_profiles SET ${fields.join(', ')} WHERE user_id = ?`, [...values, userId]);
     return this.getPharmacistProfile(userId);
   }
 
@@ -405,7 +399,7 @@ export class HospitalService {
     if (!name || !email || !password || !role) throw AppError.badRequest('name, email, password and role are required');
     const upperRole = role.toUpperCase();
     if (!['DOCTOR', 'PHARMACIST'].includes(upperRole)) throw AppError.badRequest('Role must be DOCTOR or PHARMACIST');
-    if (password.length < 6)    throw AppError.badRequest('Password must be at least 6 characters');
+    if (password.length < PASSWORD_MIN_LENGTH) throw AppError.badRequest(`Password must be at least ${PASSWORD_MIN_LENGTH} characters`);
     if (name.trim().length < 2) throw AppError.badRequest('Name must be at least 2 characters');
 
     // Check team limit

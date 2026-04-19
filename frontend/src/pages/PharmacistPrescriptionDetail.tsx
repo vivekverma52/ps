@@ -738,33 +738,91 @@ export default function PharmacistPrescriptionDetail() {
 
       {/* ── Patient banner ── */}
       <div className="card" style={{ padding: '16px 20px', marginBottom: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12 }}>
-          <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'var(--teal-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--teal-dark)' }}>
-              {prescription.patient_name.charAt(0).toUpperCase()}
-            </span>
-          </div>
-          <div style={{ flex: 1 }}>
-            <h2 style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', margin: 0, marginBottom: 2 }}>{prescription.patient_name}</h2>
-            <p style={{ fontSize: 12, color: 'var(--ink-light)' }}>{prescription.patient_phone}</p>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 2 }}>Prescribed by</p>
-            <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Dr. {prescription.doctor_name}</p>
-          </div>
-        </div>
-        <div className="info-grid-3">
-          {[
-            ['Language', prescription.language],
-            ['Date', new Date(prescription.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })],
-            ['Medicines', `${prescription.interpreted_data?.medicines?.length ?? 0} added`],
-          ].map(([label, value]) => (
-            <div key={label} style={{ background: 'var(--cell)', borderRadius: 9, padding: '7px 12px' }}>
-              <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 2 }}>{label}</p>
-              <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>{value}</p>
+
+        {editingPatient ? (
+          /* ── Edit mode ── */
+          <div>
+            <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: 'var(--ink-light)', marginBottom: 12 }}>
+              Edit Patient Details
+            </p>
+            <div className="form-grid-2" style={{ marginBottom: 10 }}>
+              <div>
+                <label style={lbl}>Patient Name *</label>
+                <input
+                  className="input-field"
+                  value={patientForm.patient_name}
+                  onChange={e => setPatientForm(f => ({ ...f, patient_name: e.target.value }))}
+                  placeholder="Full name"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label style={lbl}>Mobile Number *</label>
+                <input
+                  className="input-field"
+                  value={patientForm.patient_phone}
+                  onChange={e => setPatientForm(f => ({ ...f, patient_phone: e.target.value }))}
+                  placeholder="10-digit number"
+                  type="tel"
+                  maxLength={10}
+                />
+              </div>
             </div>
-          ))}
-        </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-teal btn-sm" onClick={handleSavePatient} disabled={savingPatient}>
+                {savingPatient ? 'Saving…' : 'Save'}
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setEditingPatient(false)} disabled={savingPatient}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* ── Display mode ── */
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12 }}>
+              <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'var(--teal-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--teal-dark)' }}>
+                  {prescription.patient_name.charAt(0).toUpperCase()}
+                </span>
+              </div>
+              <div style={{ flex: 1 }}>
+                <h2 style={{ fontSize: 15, fontWeight: 600, color: 'var(--ink)', margin: 0, marginBottom: 2 }}>{prescription.patient_name}</h2>
+                <p style={{ fontSize: 12, color: 'var(--ink-light)' }}>{prescription.patient_phone}</p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ textAlign: 'right' }}>
+                  <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 2 }}>Prescribed by</p>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Dr. {prescription.doctor_name}</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setPatientForm({ patient_name: prescription.patient_name, patient_phone: prescription.patient_phone })
+                    setEditingPatient(true)
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: 'var(--teal)', background: 'var(--teal-light)', border: 'none', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', flexShrink: 0 }}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                  </svg>
+                  Edit
+                </button>
+              </div>
+            </div>
+            <div className="info-grid-3">
+              {[
+                ['Language', prescription.language],
+                ['Date', new Date(prescription.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })],
+                ['Medicines', `${prescription.interpreted_data?.medicines?.length ?? 0} added`],
+              ].map(([label, value]) => (
+                <div key={label} style={{ background: 'var(--cell)', borderRadius: 9, padding: '7px 12px' }}>
+                  <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 2 }}>{label}</p>
+                  <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)' }}>{value}</p>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {/* ── Main grid ── */}

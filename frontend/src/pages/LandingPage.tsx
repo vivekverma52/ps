@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { motion, useInView } from "framer-motion"
 
 /* ─── Google Fonts ─────────────────────────────────────────────────────────── */
 if (!document.getElementById("ms-fonts")) {
@@ -27,47 +28,59 @@ html { scroll-behavior: smooth; }
 body { background: var(--cream); font-family: 'DM Sans', sans-serif; overflow-x: hidden; }
 
 /* NAV */
-.ms-nav {
-  position:fixed; top:0; left:0; right:0; z-index:100;
-  display:flex; align-items:center; justify-content:space-between;
-  padding:0 48px; height:58px;
-  background:var(--cream); border-bottom:1px solid var(--border);
+.ms-nav-wrap {
+  position:fixed; top:16px; left:0; right:0; z-index:100;
+  display:flex; justify-content:center; padding:0 40px; pointer-events:none;
 }
-.ms-logo { display:flex; align-items:center; gap:8px; font-weight:600; font-size:14.5px; letter-spacing:-.3px; color:var(--ink); text-decoration:none; cursor:pointer; }
-.ms-logo-icon { width:28px; height:28px; background:var(--ink); border-radius:7px; display:flex; align-items:center; justify-content:center; }
-.ms-logo-icon span { color:#fff; font-weight:800; font-size:12px; letter-spacing:-.5px; }
-.ms-nav-links { display:flex; gap:4px; list-style:none; }
-.ms-nav-links a { font-size:13px; color:var(--ink-mid); text-decoration:none; padding:6px 11px; border-radius:6px; transition:background .15s; }
-.ms-nav-links a:hover { background:var(--cream-dark); }
-.ms-nav-actions { display:flex; gap:8px; align-items:center; }
-.ms-btn-ghost { background:none; border:none; font-family:inherit; font-size:13px; font-weight:500; color:var(--ink); padding:7px 14px; border-radius:6px; cursor:pointer; transition:background .15s; }
-.ms-btn-ghost:hover { background:var(--cream-dark); }
-.ms-btn-solid { background:var(--ink); color:#fff; border:none; font-family:inherit; font-size:13px; font-weight:500; padding:8px 18px; border-radius:20px; cursor:pointer; transition:opacity .15s; }
-.ms-btn-solid:hover { opacity:.82; }
+.ms-nav {
+  pointer-events:all;
+  display:flex; align-items:center; gap:0;
+  width:100%; max-width:1200px;
+  background:#1a1a18; border-radius:100px;
+  padding:6px 6px 6px 18px;
+  box-shadow:0 4px 32px rgba(0,0,0,.22), 0 1px 0 rgba(255,255,255,.06) inset;
+}
+.ms-logo { display:flex; align-items:center; gap:0; cursor:pointer; text-decoration:none; }
+.ms-logo-icon { width:30px; height:30px; background:var(--teal); border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.ms-logo-icon span { color:#fff; font-weight:800; font-size:11px; letter-spacing:-.5px; }
+.ms-nav-links { display:flex; gap:0; list-style:none; flex:1; justify-content:center; }
+.ms-nav-links a { font-size:13px; color:rgba(255,255,255,.6); text-decoration:none; padding:7px 14px; border-radius:100px; transition:color .15s; white-space:nowrap; }
+.ms-nav-links a:hover { color:rgba(255,255,255,.95); }
+.ms-nav-actions { display:flex; gap:6px; align-items:center; margin-left:4px; }
+.ms-btn-ghost { background:none; border:none; font-family:inherit; font-size:13px; font-weight:500; color:rgba(255,255,255,.65); padding:7px 14px; border-radius:100px; cursor:pointer; transition:color .15s; white-space:nowrap; }
+.ms-btn-ghost:hover { color:#fff; }
+.ms-btn-solid { background:#fff; color:var(--ink); border:none; font-family:inherit; font-size:13px; font-weight:600; padding:9px 20px; border-radius:100px; cursor:pointer; transition:opacity .15s; white-space:nowrap; }
+.ms-btn-solid:hover { opacity:.88; }
 
 /* HERO */
 .ms-hero {
-  min-height:100vh; padding-top:58px;
-  display:grid; grid-template-columns:1fr 1fr;
+  min-height:100vh; padding-top:80px;
+  display:grid; grid-template-columns:52% 48%;
   align-items:center; position:relative; overflow:hidden;
 }
 .ms-hero::before {
   content:''; position:absolute; inset:0; pointer-events:none;
-  background:linear-gradient(135deg,transparent 20%,rgba(255,255,255,.45) 30%,rgba(255,255,255,.55) 50%,rgba(255,255,255,.45) 70%,transparent 80%);
+  background:
+    radial-gradient(ellipse 60% 50% at 20% 50%, rgba(13,148,136,.06) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 60% at 80% 30%, rgba(255,255,255,.55) 0%, transparent 70%);
 }
-.ms-hero-left { padding:0 0 0 80px; position:relative; z-index:2; }
-.ms-hero-eyebrow { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:500; color:var(--ink-light); letter-spacing:.6px; text-transform:uppercase; margin-bottom:18px; }
+.ms-hero-left {
+  padding:0 48px 0 80px;
+  position:relative; z-index:2;
+  display:flex; flex-direction:column; justify-content:center;
+}
+.ms-hero-eyebrow { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:500; color:var(--ink-light); letter-spacing:.6px; text-transform:uppercase; margin-bottom:22px; }
 .ms-hero-eyebrow-dot { width:6px; height:6px; border-radius:50%; background:var(--teal); display:inline-block; }
-.ms-hero-title { font-size:clamp(36px,4vw,54px); font-weight:500; letter-spacing:-1.8px; line-height:1.08; color:var(--ink); }
-.ms-hero-title em { font-family:'Instrument Serif',serif; font-style:italic; font-weight:400; display:block; }
-.ms-hero-sub { font-size:13.5px; color:var(--ink-light); line-height:1.65; margin-top:16px; max-width:256px; }
-.ms-hero-ctas { display:flex; gap:12px; margin-top:28px; align-items:center; }
-.ms-cta-p { background:var(--ink); color:#fff; border:none; font-family:inherit; font-size:13.5px; font-weight:500; padding:11px 22px; border-radius:8px; cursor:pointer; transition:opacity .15s; }
+.ms-hero-title { font-size:clamp(42px,4.5vw,66px); font-weight:700; letter-spacing:-2.5px; line-height:1.04; color:var(--ink); }
+.ms-hero-title em { font-family:'Instrument Serif',serif; font-style:italic; font-weight:400; display:block; letter-spacing:-1.5px; }
+.ms-hero-sub { font-size:15px; color:var(--ink-mid); line-height:1.65; margin-top:20px; max-width:320px; }
+.ms-hero-ctas { display:flex; gap:12px; margin-top:36px; align-items:center; }
+.ms-cta-p { background:var(--ink); color:#fff; border:none; font-family:inherit; font-size:14px; font-weight:600; padding:13px 28px; border-radius:10px; cursor:pointer; transition:opacity .15s; }
 .ms-cta-p:hover { opacity:.82; }
-.ms-cta-s { background:none; color:var(--ink); border:1.5px solid rgba(0,0,0,.2); font-family:inherit; font-size:13.5px; font-weight:500; padding:10px 22px; border-radius:8px; cursor:pointer; transition:border-color .15s; }
-.ms-cta-s:hover { border-color:var(--ink); }
-.ms-badges { display:flex; gap:22px; margin-top:40px; flex-wrap:wrap; }
-.ms-badge-item { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--ink-light); }
+.ms-cta-s { background:none; color:var(--ink); border:1.5px solid rgba(0,0,0,.18); font-family:inherit; font-size:14px; font-weight:500; padding:12px 24px; border-radius:10px; cursor:pointer; transition:border-color .15s,background .15s; }
+.ms-cta-s:hover { border-color:var(--ink); background:rgba(0,0,0,.04); }
+.ms-badges { display:flex; gap:28px; margin-top:48px; flex-wrap:wrap; }
+.ms-badge-item { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--ink-light); }
 .ms-badge-dot { width:7px; height:7px; border-radius:50%; border:1.5px solid var(--ink-light); }
 .ms-hero-right { position:relative; height:100vh; }
 .ms-hero-right canvas { width:100%; height:100%; display:block; }
@@ -154,6 +167,55 @@ body { background: var(--cream); font-family: 'DM Sans', sans-serif; overflow-x:
 .ms-plan.featured .ms-plan-btn { background:#fff; color:var(--ink); }
 .ms-plan-btn:hover { opacity:.82; }
 
+/* TESTIMONIALS */
+.ms-testimonials { padding:80px 32px 100px; background:var(--cream); }
+.ms-testimonials-inner { max-width:980px; margin:0 auto; }
+.ms-section-header { margin-bottom:44px; }
+.ms-section-header h2 { font-size:clamp(26px,3vw,38px); font-weight:500; letter-spacing:-1px; color:var(--ink); }
+.ms-section-header p { font-size:13.5px; color:var(--ink-light); margin-top:8px; }
+.ms-testi-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+.ms-testi-card { background:#fff; border:1px solid var(--border); border-radius:16px; padding:28px; display:flex; flex-direction:column; gap:16px; }
+.ms-testi-card.featured-t { background:var(--ink); border-color:var(--ink); }
+.ms-testi-stars { display:flex; gap:3px; }
+.ms-testi-star { color:#f59e0b; font-size:13px; }
+.ms-testi-card.featured-t .ms-testi-star { color:#fbbf24; }
+.ms-testi-quote { font-size:13.5px; line-height:1.72; color:var(--ink-mid); flex:1; }
+.ms-testi-card.featured-t .ms-testi-quote { color:rgba(255,255,255,.75); }
+.ms-testi-footer { display:flex; align-items:center; gap:12px; border-top:1px solid var(--border); padding-top:16px; }
+.ms-testi-card.featured-t .ms-testi-footer { border-color:rgba(255,255,255,.1); }
+.ms-testi-avatar { width:36px; height:36px; border-radius:50%; background:var(--cream-dark); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; color:var(--ink-mid); flex-shrink:0; }
+.ms-testi-card.featured-t .ms-testi-avatar { background:rgba(255,255,255,.12); color:#fff; }
+.ms-testi-name { font-size:12.5px; font-weight:600; color:var(--ink); line-height:1.3; }
+.ms-testi-card.featured-t .ms-testi-name { color:#fff; }
+.ms-testi-role { font-size:11px; color:var(--ink-light); }
+.ms-testi-card.featured-t .ms-testi-role { color:rgba(255,255,255,.45); }
+
+/* FAQ */
+.ms-faq { padding:80px 32px 100px; background:var(--cream-dark); }
+.ms-faq-inner { max-width:680px; margin:0 auto; }
+.ms-faq-list { display:flex; flex-direction:column; gap:2px; margin-top:44px; }
+.ms-faq-item { border:1px solid var(--border); border-radius:12px; overflow:hidden; background:#fff; }
+.ms-faq-q { width:100%; background:none; border:none; font-family:inherit; font-size:13.5px; font-weight:500; color:var(--ink); text-align:left; padding:18px 20px; cursor:pointer; display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.ms-faq-q:hover { background:var(--cream); }
+.ms-faq-icon { flex-shrink:0; width:18px; height:18px; border-radius:50%; border:1.5px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:13px; color:var(--ink-light); transition:transform .2s; }
+.ms-faq-icon.open { transform:rotate(45deg); }
+.ms-faq-a { font-size:13px; line-height:1.72; color:var(--ink-light); padding:0 20px 18px; }
+
+/* FINAL CTA */
+.ms-cta-section { padding:80px 32px 100px; background:var(--cream); display:flex; justify-content:center; }
+.ms-cta-card { width:100%; max-width:780px; background:var(--dark); border-radius:24px; padding:60px 64px; text-align:center; position:relative; overflow:hidden; box-shadow:0 20px 80px rgba(10,31,30,.4); }
+.ms-cta-card::before { content:''; position:absolute; inset:0; pointer-events:none; background-image:radial-gradient(circle,rgba(255,255,255,0.04) 1px,transparent 1px); background-size:24px 24px; }
+.ms-cta-card::after { content:''; position:absolute; top:-60px; left:50%; transform:translateX(-50%); width:300px; height:300px; border-radius:50%; background:radial-gradient(circle,rgba(13,148,136,.18) 0%,transparent 70%); pointer-events:none; }
+.ms-cta-card h2 { font-size:clamp(24px,3vw,36px); font-weight:500; color:#fff; letter-spacing:-1px; line-height:1.12; position:relative; z-index:2; }
+.ms-cta-card h2 em { font-family:'Instrument Serif',serif; font-style:italic; font-weight:400; display:block; }
+.ms-cta-card p { font-size:13.5px; color:rgba(255,255,255,.45); margin-top:14px; line-height:1.7; position:relative; z-index:2; }
+.ms-cta-btns { display:flex; gap:12px; justify-content:center; margin-top:32px; flex-wrap:wrap; position:relative; z-index:2; }
+.ms-cta-btn-p { background:#0d9488; color:#fff; border:none; font-family:inherit; font-size:13.5px; font-weight:500; padding:12px 28px; border-radius:8px; cursor:pointer; transition:opacity .15s; }
+.ms-cta-btn-p:hover { opacity:.85; }
+.ms-cta-btn-s { background:rgba(255,255,255,.07); color:rgba(255,255,255,.8); border:1px solid rgba(255,255,255,.12); font-family:inherit; font-size:13.5px; font-weight:500; padding:12px 28px; border-radius:8px; cursor:pointer; transition:background .15s; }
+.ms-cta-btn-s:hover { background:rgba(255,255,255,.12); }
+.ms-cta-note { font-size:11.5px; color:rgba(255,255,255,.28); margin-top:16px; position:relative; z-index:2; }
+
 /* FOOTER */
 .ms-footer { border-top:1px solid var(--border); padding:28px 48px; display:flex; align-items:center; justify-content:space-between; background:var(--cream); }
 .ms-footer-logo { display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:600; color:var(--ink); }
@@ -162,19 +224,34 @@ body { background: var(--cream); font-family: 'DM Sans', sans-serif; overflow-x:
 .ms-footer-links a { font-size:12px; color:var(--ink-light); text-decoration:none; }
 .ms-footer-links a:hover { color:var(--ink-mid); }
 
-/* ── MOBILE RESPONSIVE ────────────────────────────────────────────────── */
-@media (max-width: 767px) {
-  /* Nav */
-  .ms-nav { padding:0 16px; }
-  .ms-nav-links { display:none; }
+/* ── TABLET (768px – 1023px) ──────────────────────────────────────────── */
+@media (max-width: 1023px) {
+  .ms-nav-wrap { padding:0 20px; }
+  .ms-hero { grid-template-columns:55% 45%; }
+  .ms-hero-left { padding:0 32px 0 40px; }
+  .ms-plans { grid-template-columns:1fr 1fr; }
+  .ms-testi-grid { grid-template-columns:1fr 1fr; }
+  .ms-wf-card { padding:36px 32px; }
+  .ms-cta-card { padding:48px 40px; }
+}
 
-  /* Hero */
-  .ms-hero { grid-template-columns:1fr; min-height:auto; padding:80px 24px 48px; }
-  .ms-hero-left { padding:0; }
+/* ── MOBILE (≤767px) ──────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  /* Nav — compact pill */
+  .ms-nav-wrap { top:12px; padding:0 16px; }
+  .ms-nav { padding:6px 6px 6px 12px; }
+  .ms-nav-links { display:none; }
+  .ms-btn-ghost { display:none; }
+  .ms-btn-solid { padding:8px 16px; font-size:12px; }
+
+  /* Hero — single column, canvas hidden */
+  .ms-hero { grid-template-columns:1fr; min-height:auto; padding:100px 24px 56px; }
+  .ms-hero-left { padding:0; text-align:center; align-items:center; }
   .ms-hero-right { display:none; }
-  .ms-hero-title { font-size:clamp(30px,8vw,42px); }
-  .ms-hero-sub { max-width:100%; }
-  .ms-badges { gap:14px; }
+  .ms-hero-title { font-size:clamp(36px,10vw,52px); letter-spacing:-2px; }
+  .ms-hero-sub { font-size:14px; max-width:100%; }
+  .ms-hero-ctas { justify-content:center; }
+  .ms-badges { justify-content:center; gap:16px; margin-top:36px; }
 
   /* Ticker */
   .ms-ticker-label strong { font-size:17px; }
@@ -182,30 +259,53 @@ body { background: var(--cream); font-family: 'DM Sans', sans-serif; overflow-x:
   /* Features */
   .ms-features { padding:40px 16px 60px; }
   .ms-grid { grid-template-columns:1fr; grid-template-rows:auto; }
-  .ms-cell { min-height:280px; }
-  .ms-cell canvas { position:relative; width:100%; height:280px; }
+  .ms-cell { min-height:300px; }
+  .ms-cell canvas { position:relative; width:100%; height:300px; }
   .ms-cell:nth-child(1) { border-right:none; }
   .ms-cell:nth-child(3) { border-right:none; border-top:1px solid var(--border); }
   .ms-text-wa { top:auto; left:auto; transform:none; position:relative; padding:28px 24px; max-width:100%; }
   .ms-text-team { bottom:auto; left:auto; position:relative; padding:28px 24px; max-width:100%; }
-  .ms-text h2 { font-size:clamp(19px,5vw,26px); }
+  .ms-text h2 { font-size:clamp(20px,5vw,28px); }
 
   /* Workflow */
   .ms-workflow { padding:40px 16px 60px; }
-  .ms-wf-card { padding:28px 20px 24px; border-radius:16px; }
+  .ms-wf-card { padding:28px 20px 24px; border-radius:18px; }
   .ms-wf-canvas-wrap { height:160px; }
   .ms-wf-sub { font-size:13px; }
+  .ms-wf-title { margin-bottom:20px; }
 
   /* Pricing */
-  .ms-pricing { padding:48px 16px 64px; }
+  .ms-pricing { padding:56px 16px 72px; }
   .ms-plans { grid-template-columns:1fr; gap:12px; }
+  .ms-pricing-header h2 { font-size:clamp(24px,7vw,32px); }
+
+  /* Testimonials */
+  .ms-testimonials { padding:56px 16px 72px; }
+  .ms-testi-grid { grid-template-columns:1fr; gap:12px; }
+  .ms-section-header h2 { font-size:clamp(24px,7vw,32px); }
+
+  /* FAQ */
+  .ms-faq { padding:56px 16px 72px; }
+  .ms-faq-q { font-size:13px; padding:16px 16px; }
+  .ms-faq-a { font-size:12.5px; padding:0 16px 16px; }
+
+  /* Final CTA */
+  .ms-cta-section { padding:56px 16px 72px; }
+  .ms-cta-card { padding:40px 24px; border-radius:20px; }
+  .ms-cta-card h2 { font-size:clamp(22px,7vw,30px); }
+  .ms-cta-btns { flex-direction:column; align-items:stretch; }
+  .ms-cta-btn-p, .ms-cta-btn-s { text-align:center; }
 
   /* Footer */
-  .ms-footer { flex-direction:column; align-items:flex-start; gap:12px; padding:24px 16px; }
+  .ms-footer { flex-direction:column; align-items:flex-start; gap:14px; padding:24px 20px; }
+  .ms-footer-links { flex-wrap:wrap; gap:14px; }
 }
 
-@media (min-width: 480px) and (max-width: 767px) {
-  .ms-plans { grid-template-columns:1fr 1fr; }
+/* ── SMALL PHONES (≤400px) ────────────────────────────────────────────── */
+@media (max-width: 400px) {
+  .ms-hero-title { font-size:clamp(30px,11vw,40px); }
+  .ms-hero-ctas { flex-direction:column; align-items:stretch; }
+  .ms-cta-p, .ms-cta-s { text-align:center; }
 }
 `
   document.head.appendChild(s)
@@ -314,7 +414,7 @@ const MEDICAL_ICONS: IconFn[] = [
   },
 ]
 
-/* ─── Hero canvas — Doctor's clinic desk ─────────────────────────────────────── */
+/* ─── Hero canvas — Clean 2D app UI mockup ───────────────────────────────────── */
 function useHeroCanvas(ref: React.RefObject<HTMLCanvasElement>) {
   useEffect(() => {
     const canvas = ref.current; if (!canvas) return
@@ -325,182 +425,246 @@ function useHeroCanvas(ref: React.RefObject<HTMLCanvasElement>) {
 
     function draw() {
       ctx.clearRect(0, 0, W, H)
-      const cx = W * .46, cy = H * .54, S = W * .19
-      const p = makeIso(cx, cy, S)
-      const DW = 2.5, DD = 1.65, DH = 0.12
-      const bx = -DW / 2, by = -DD / 2
 
-      // ── DESK ──────────────────────────────────────────────────────────
-      isoBox(ctx, p, bx, by, 0, DW, DD, DH, "#dedad2", "#c4c0b8", "#b8b4ac", "rgba(0,0,0,0.12)")
-      // desk mat
-      isoBox(ctx, p, bx+.1, by+.1, DH, DW-.2, DD-.2, .025, "#d0cdc5", "#b4b0a8", "#aaa69e", "rgba(0,0,0,0.07)")
+      // ── SUBTLE DOT GRID BACKGROUND ────────────────────────────────
+      ctx.save(); ctx.globalAlpha = .45
+      const gS = 24
+      for (let gx = gS; gx < W; gx += gS)
+        for (let gy = gS; gy < H; gy += gS) {
+          ctx.beginPath(); ctx.arc(gx, gy, .9, 0, Math.PI*2)
+          ctx.fillStyle = "rgba(0,0,0,0.12)"; ctx.fill()
+        }
+      ctx.restore()
 
-      // ── MONITOR ───────────────────────────────────────────────────────
-      const mX = bx + 1.28, mY = by + .06
-      const mW = .07, mD = .82, mH = 1.18
-      // Stand base
-      isoBox(ctx, p, mX+.18, mY+.22, DH+.02, .38, .22, .04, "#c0bdb6", "#a8a4a0", "#9c9896")
-      // Stand neck
-      isoBox(ctx, p, mX+.28, mY+.30, DH+.06, .13, .06, .26, "#b8b4ae", "#a0a09a", "#949490")
-      // Screen body
-      isoBox(ctx, p, mX, mY, DH+.32, mW, mD, mH, "#1e1e1c", "#141412", "#0e0e0c", "rgba(0,0,0,0.35)")
+      // ── APP WINDOW ────────────────────────────────────────────────
+      const scale  = Math.min(W / 520, H / 700, 1)
+      const winW   = Math.min(460 * scale, W * .90)
+      const winH   = Math.min(530 * scale, H * .72)
+      const winX   = (W - winW) / 2 + W * .04
+      const winY   = H * .14
+      const tbH    = Math.round(34 * scale)
+      const sbW    = Math.round(winW * .30)
+      const pad    = Math.round(18 * scale)
+      const fs     = (n: number) => `${Math.round(n * scale)}px`
 
-      // Draw prescription UI lines on the RIGHT face of monitor (visible to viewer)
-      const sc0 = p(mX+mW, mY,    DH+.32)
-      const scT = p(mX+mW, mY,    DH+.32+mH)
-      const scTD= p(mX+mW, mY+mD, DH+.32+mH)
-      const scD = p(mX+mW, mY+mD, DH+.32)
+      // Window shadow + body
       ctx.save()
-      ctx.beginPath()
-      ctx.moveTo(sc0[0],sc0[1]); ctx.lineTo(scT[0],scT[1])
-      ctx.lineTo(scTD[0],scTD[1]); ctx.lineTo(scD[0],scD[1])
-      ctx.closePath()
-      ctx.fillStyle = "#101418"; ctx.fill()
-      ctx.clip()
-      // animated prescription form lines
-      const sLines = [
-        { t:.84, col:"#0d9488",             lw:1.9, len:.72, delay:0   },
-        { t:.72, col:"rgba(255,255,255,.45)",lw:1.2, len:.55, delay:.18 },
-        { t:.60, col:"rgba(255,255,255,.45)",lw:1.2, len:.68, delay:.32 },
-        { t:.48, col:"#0d9488",             lw:1.6, len:.48, delay:.46 },
-        { t:.36, col:"rgba(255,255,255,.40)",lw:1.1, len:.60, delay:.60 },
-        { t:.24, col:"rgba(255,255,255,.40)",lw:1.1, len:.42, delay:.72 },
-        { t:.14, col:"rgba(255,255,255,.30)",lw:1.0, len:.35, delay:.84 },
-      ]
-      const dxBot = scD[0]-sc0[0], dyBot = scD[1]-sc0[1]
-      const dxTop = scTD[0]-scT[0], dyTop = scTD[1]-scT[1]
-      sLines.forEach(({ t, col, lw, len, delay }) => {
-        const prog = Math.max(0, Math.min(len, (T*1.1 - delay) * len))
-        if (prog < .01) return
-        const sx = sc0[0]+(scT[0]-sc0[0])*t, sy = sc0[1]+(scT[1]-sc0[1])*t
-        const rdx = dxBot*(1-t)+dxTop*t, rdy = dyBot*(1-t)+dyTop*t
-        const indent = .07
-        ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.lineCap = "round"
-        ctx.globalAlpha = Math.min(1, T*2.5)
-        ctx.beginPath()
-        ctx.moveTo(sx+rdx*indent, sy+rdy*indent)
-        ctx.lineTo(sx+rdx*(indent+prog*(1-indent)), sy+rdy*(indent+prog*(1-indent)))
-        ctx.stroke()
-      })
-      ctx.restore()
-
-      // ── PRESCRIPTION PAD ──────────────────────────────────────────────
-      const padX = bx+.08, padY = by+.12
-      // Paper layers
-      for (let i = 2; i >= 0; i--) {
-        const oz = i * .016
-        isoBox(ctx, p, padX+i*.007, padY+i*.007, DH+.03+oz, .88, .72, .007,
-          i===0 ? "#f8f6f0" : "#f0ede6",
-          i===0 ? "#e8e4da" : "#e0dcd0",
-          i===0 ? "#e0dcd2" : "#d8d4c8")
-      }
-      // Animated text lines on pad
-      const pLines = [
-        { xOff:.09, yOff:.10, w:.56, col:"#1a1a18", d:0   },
-        { xOff:.09, yOff:.22, w:.40, col:"#9a9a90", d:.2  },
-        { xOff:.09, yOff:.34, w:.52, col:"#0d9488", d:.4  },
-        { xOff:.09, yOff:.45, w:.36, col:"#9a9a90", d:.55 },
-        { xOff:.09, yOff:.56, w:.48, col:"#0d9488", d:.7  },
-        { xOff:.09, yOff:.66, w:.30, col:"#9a9a90", d:.85 },
-      ]
-      pLines.forEach(({ xOff, yOff, w, col, d }) => {
-        const prog = Math.max(0, Math.min(1, T*.95 - d))
-        if (prog <= 0) return
-        isoBox(ctx, p, padX+xOff, padY+yOff, DH+.065, w*prog, .025, .007, col, col, col, "none")
-      })
-      // Rx label
-      const rxPt = p(padX+.18, padY+.03, DH+.068)
-      ctx.save(); ctx.globalAlpha = Math.min(1, T*2)
-      ctx.font = `800 9px 'DM Sans',sans-serif`; ctx.fillStyle = "#0d9488"; ctx.textAlign = "center"
-      ctx.fillText("Rx", rxPt[0], rxPt[1]); ctx.restore()
-
-      // ── STETHOSCOPE ───────────────────────────────────────────────────
-      const sc = p(bx+1.05, by+.92, DH+.04)
-      ctx.save()
-      // Chest piece
-      ctx.beginPath(); ctx.arc(sc[0], sc[1], 8, 0, Math.PI*2)
-      ctx.fillStyle = "#7a7a74"; ctx.fill()
-      ctx.beginPath(); ctx.arc(sc[0], sc[1], 5, 0, Math.PI*2)
-      ctx.fillStyle = "#5a5a54"; ctx.fill()
-      // Tube
-      ctx.strokeStyle = "#555550"; ctx.lineWidth = 2.8; ctx.lineCap = "round"
-      ctx.beginPath()
-      ctx.moveTo(sc[0], sc[1]-8)
-      ctx.bezierCurveTo(sc[0]-3, sc[1]-22, sc[0]-18, sc[1]-16, sc[0]-20, sc[1]-7)
-      ctx.stroke()
-      // Earpiece Y-split
-      ctx.beginPath()
-      ctx.moveTo(sc[0]-20, sc[1]-7)
-      ctx.bezierCurveTo(sc[0]-22, sc[1]-14, sc[0]-28, sc[1]-14, sc[0]-29, sc[1]-9)
-      ctx.stroke()
-      ctx.beginPath()
-      ctx.moveTo(sc[0]-20, sc[1]-7)
-      ctx.bezierCurveTo(sc[0]-18, sc[1]-13, sc[0]-15, sc[1]-17, sc[0]-15, sc[1]-21)
-      ctx.stroke()
-      // Tips
-      ;[[sc[0]-29, sc[1]-9],[sc[0]-15, sc[1]-21]].forEach(([ex, ey]) => {
-        ctx.beginPath(); ctx.arc(ex, ey, 2.8, 0, Math.PI*2)
-        ctx.fillStyle = "#3a3a38"; ctx.fill()
-      })
-      ctx.restore()
-
-      // ── MEDICINE BOTTLE ───────────────────────────────────────────────
-      const btX = bx+DW-.44, btY = by+DD*.50
-      isoBox(ctx, p, btX, btY, DH+.03, .17, .17, .40, "#c5e6e0", "#a2cac4", "#8eb8b2")
-      isoBox(ctx, p, btX+.02, btY+.02, DH+.43, .13, .13, .08, "#0d9488", "#0a6b61", "#085a52")
-      const lblPt = p(btX+.085, btY+.085, DH+.19)
-      ctx.save(); ctx.globalAlpha = .7
-      ctx.font = `700 6px 'DM Sans',sans-serif`; ctx.fillStyle = "#085a52"; ctx.textAlign = "center"
-      ctx.fillText("Rx", lblPt[0], lblPt[1]); ctx.restore()
-
-      // ── MEDICAL CROSS ─────────────────────────────────────────────────
-      const crX = bx+.06, crY = by+DD*.74
-      isoBox(ctx, p, crX+.04, crY,     DH+.03, .055, .145, .007, "#0d9488", "#0a6b61", "#085a52", "none")
-      isoBox(ctx, p, crX,     crY+.04, DH+.03, .145, .055, .007, "#0d9488", "#0a6b61", "#085a52", "none")
-
-      // ── FLOATING DISCS ────────────────────────────────────────────────
-      const d1z = .60+Math.sin(T*1.4)*.09
-      const d1t = isoDisc(ctx, p, bx+DW*.70, by-.20, DH+d1z, S*.2, S*.10, "#d8d4cc", "#b4b0ac")
-      ctx.save(); ctx.translate(d1t[0], d1t[1]-3)
-      ctx.strokeStyle="#0d9488"; ctx.lineWidth=2.8; ctx.lineCap="round"
-      ctx.beginPath(); ctx.moveTo(-7,0); ctx.lineTo(7,0); ctx.moveTo(0,-7); ctx.lineTo(0,7); ctx.stroke()
-      ctx.restore()
-
-      const d2z = .42+Math.sin(T*1.2+.7)*.08
-      const d2t = isoDisc(ctx, p, bx-.38, by+.52, DH+d2z, S*.17, S*.085, "#c8c4bc", "#a8a4a0")
-      ctx.save(); ctx.translate(d2t[0], d2t[1]-2)
-      ctx.strokeStyle="#0d9488"; ctx.lineWidth=2.2; ctx.lineCap="round"; ctx.lineJoin="round"
-      ctx.beginPath(); ctx.moveTo(-6,0); ctx.lineTo(-1,6); ctx.lineTo(8,-5); ctx.stroke()
-      ctx.restore()
-
-      // Dashed line: disc → monitor
-      const dA = p(bx+DW*.70, by-.20, DH+d1z-.04)
-      const dB = p(mX+mW, mY+mD*.35, DH+.32+mH*.7)
-      const off = (T*50)%11
-      ctx.save(); ctx.setLineDash([5,6]); ctx.lineDashOffset=-off
-      ctx.strokeStyle="rgba(0,0,0,0.14)"; ctx.lineWidth=1; ctx.globalAlpha=.6
-      ctx.beginPath(); ctx.moveTo(dA[0],dA[1]); ctx.lineTo(dB[0],dB[1]); ctx.stroke()
-      ctx.restore()
-
-      // ── FLOATING Rx CARD ──────────────────────────────────────────────
-      const bfloat = Math.sin(T*.9)*4
-      const bpt = p(-0.68, 0.88, 0.88)
-      ctx.save()
-      ctx.globalAlpha = .93
-      ctx.shadowColor = "rgba(0,0,0,0.14)"; ctx.shadowBlur = 14
+      ctx.shadowColor = "rgba(0,0,0,0.18)"; ctx.shadowBlur = 48; ctx.shadowOffsetY = 14
       ctx.fillStyle = "#fff"
-      ctx.beginPath(); ctx.roundRect(bpt[0]-44, bpt[1]-24+bfloat, 88, 50, 9); ctx.fill()
-      ctx.shadowBlur = 0
-      // Teal left accent bar
-      ctx.fillStyle = "#0d9488"
-      ctx.beginPath(); ctx.roundRect(bpt[0]-44, bpt[1]-24+bfloat, 4, 50, [9,0,0,9]); ctx.fill()
-      ctx.font = `700 13px 'DM Sans',sans-serif`; ctx.fillStyle = "#0d9488"; ctx.textAlign = "left"
-      ctx.fillText("Rx", bpt[0]-34, bpt[1]-8+bfloat)
-      ctx.font = `500 8px 'DM Sans',sans-serif`; ctx.fillStyle = "#4a4a44"
-      ctx.fillText("Ramesh Kumar", bpt[0]-34, bpt[1]+4+bfloat)
-      ctx.font = `400 7.5px 'DM Sans',sans-serif`; ctx.fillStyle = "#9a9a90"
-      ctx.fillText("Amoxicillin · 500mg · 3×/day", bpt[0]-34, bpt[1]+15+bfloat)
+      ctx.beginPath(); ctx.roundRect(winX, winY, winW, winH, 14); ctx.fill()
       ctx.restore()
+
+      // ── TITLE BAR ─────────────────────────────────────────────────
+      ctx.save()
+      ctx.fillStyle = "#1a1a18"
+      ctx.beginPath(); ctx.roundRect(winX, winY, winW, tbH, [14,14,0,0]); ctx.fill()
+      // Traffic lights
+      ;[["#ff5f57",0],["#febc2e",18],["#28c840",36]].forEach(([col, ox]) => {
+        ctx.beginPath(); ctx.arc(winX+14+ox, winY+tbH/2, Math.round(4.5*scale), 0, Math.PI*2)
+        ctx.fillStyle = col as string; ctx.fill()
+      })
+      // Title
+      ctx.font = `500 ${fs(10)} 'DM Sans',sans-serif`
+      ctx.fillStyle = "rgba(255,255,255,.5)"; ctx.textAlign = "center"
+      ctx.fillText("Prescription Manager · Apollo Clinic", winX+winW/2, winY+tbH/2+4)
+      ctx.restore()
+
+      // ── SIDEBAR ───────────────────────────────────────────────────
+      ctx.save()
+      ctx.fillStyle = "#111110"
+      ctx.beginPath(); ctx.roundRect(winX, winY+tbH, sbW, winH-tbH, [0,0,0,14]); ctx.fill()
+
+      // Logo
+      const lY = winY+tbH+pad
+      ctx.fillStyle = "#0d9488"
+      ctx.beginPath(); ctx.roundRect(winX+pad, lY, Math.round(24*scale), Math.round(24*scale), 6); ctx.fill()
+      ctx.font = `700 ${fs(10)} 'DM Sans',sans-serif`; ctx.fillStyle = "#fff"; ctx.textAlign = "center"
+      ctx.fillText("Rx", winX+pad+Math.round(12*scale), lY+Math.round(16*scale))
+      ctx.font = `600 ${fs(10)} 'DM Sans',sans-serif`; ctx.fillStyle = "#fff"; ctx.textAlign = "left"
+      ctx.fillText("MediLingua", winX+pad+Math.round(32*scale), lY+Math.round(16*scale))
+
+      // Nav
+      const navItems = ["Dashboard","Prescriptions","Patients","Settings"]
+      const activeIdx = 1
+      navItems.forEach((label, i) => {
+        const ny = lY + Math.round(44*scale) + i * Math.round(32*scale)
+        if (i === activeIdx) {
+          ctx.fillStyle = "rgba(13,148,136,.18)"
+          ctx.beginPath(); ctx.roundRect(winX+8, ny-Math.round(10*scale), sbW-16, Math.round(26*scale), 7); ctx.fill()
+        }
+        ctx.font = `${i===activeIdx?600:400} ${fs(10)} 'DM Sans',sans-serif`
+        ctx.fillStyle = i===activeIdx ? "#0d9488" : "rgba(255,255,255,.35)"
+        ctx.textAlign = "left"
+        ctx.fillText(label, winX+pad+Math.round(4*scale), ny+Math.round(5*scale))
+      })
+
+      // Recent section
+      const secY = lY + Math.round(44*scale) + navItems.length*Math.round(32*scale) + Math.round(18*scale)
+      ctx.font = `600 ${fs(7.5)} 'DM Sans',sans-serif`
+      ctx.fillStyle = "rgba(255,255,255,.22)"; ctx.textAlign = "left"
+      ctx.fillText("RECENT", winX+pad, secY)
+
+      const recent = [
+        { name:"Ramesh Kumar", color:"#0d9488", active:true  },
+        { name:"Priya Sharma",  color:"#f59e0b", active:false },
+        { name:"Vikram Nair",   color:"#6b7280", active:false },
+      ]
+      recent.forEach(({ name, color, active }, i) => {
+        const ry = secY + Math.round(18*scale) + i*Math.round(30*scale)
+        if (active) {
+          ctx.fillStyle = "rgba(255,255,255,.06)"
+          ctx.beginPath(); ctx.roundRect(winX+8, ry-Math.round(8*scale), sbW-16, Math.round(24*scale), 6); ctx.fill()
+        }
+        ctx.beginPath(); ctx.arc(winX+pad+Math.round(5*scale), ry+Math.round(4*scale), Math.round(3.5*scale), 0, Math.PI*2)
+        ctx.fillStyle = color; ctx.fill()
+        ctx.font = `${active?500:400} ${fs(9.5)} 'DM Sans',sans-serif`
+        ctx.fillStyle = active ? "#fff" : "rgba(255,255,255,.35)"; ctx.textAlign = "left"
+        ctx.fillText(name, winX+pad+Math.round(16*scale), ry+Math.round(8*scale))
+      })
+      ctx.restore()
+
+      // ── MAIN CONTENT ──────────────────────────────────────────────
+      const mcX = winX + sbW
+      const mcY = winY + tbH
+      const mcW = winW - sbW
+      const mcH = winH - tbH
+
+      ctx.save()
+      ctx.fillStyle = "#fafaf9"
+      ctx.beginPath(); ctx.roundRect(mcX, mcY, mcW, mcH, [0,0,14,0]); ctx.fill()
+
+      // Content header
+      const chY = mcY + pad
+      ctx.font = `700 ${fs(12.5)} 'DM Sans',sans-serif`; ctx.fillStyle = "#1a1a18"; ctx.textAlign = "left"
+      ctx.fillText("Prescription #RX-2024-0891", mcX+pad, chY+Math.round(13*scale))
+
+      // Animated status badge
+      const isDelivered = T > 2.2
+      ctx.fillStyle = isDelivered ? "#dcfce7" : "#fef9c3"
+      const bdW = Math.round(80*scale), bdH = Math.round(20*scale)
+      ctx.beginPath(); ctx.roundRect(mcX+mcW-pad-bdW, chY+Math.round(2*scale), bdW, bdH, bdH/2); ctx.fill()
+      ctx.font = `600 ${fs(8)} 'DM Sans',sans-serif`
+      ctx.fillStyle = isDelivered ? "#15803d" : "#854d0e"; ctx.textAlign = "center"
+      ctx.fillText(isDelivered ? "✓ Delivered" : "Processing…", mcX+mcW-pad-bdW/2, chY+Math.round(14*scale))
+
+      // Divider
+      ctx.fillStyle = "#e8e4db"; ctx.fillRect(mcX+pad, chY+Math.round(26*scale), mcW-pad*2, 1)
+
+      // Patient + Doctor info
+      const infoY = chY + Math.round(36*scale)
+      ;[
+        { label:"PATIENT", name:"Ramesh Kumar", sub:"+91 98765 43210", x:mcX+pad },
+        { label:"DOCTOR",  name:"Dr. R. Iyer",  sub:"Apollo Clinic, Chennai", x:mcX+pad+(mcW-pad*2)/2 },
+      ].forEach(({ label, name, sub, x }) => {
+        ctx.font = `600 ${fs(7)} 'DM Sans',sans-serif`; ctx.fillStyle = "#9a9a90"; ctx.textAlign = "left"
+        ctx.fillText(label, x, infoY)
+        ctx.font = `600 ${fs(10.5)} 'DM Sans',sans-serif`; ctx.fillStyle = "#1a1a18"
+        ctx.fillText(name, x, infoY+Math.round(16*scale))
+        ctx.font = `400 ${fs(8.5)} 'DM Sans',sans-serif`; ctx.fillStyle = "#9a9a90"
+        ctx.fillText(sub, x, infoY+Math.round(28*scale))
+      })
+
+      // Medicines box
+      const medBoxY = infoY + Math.round(44*scale)
+      const medBoxH = mcH - (medBoxY-mcY) - pad - Math.round(42*scale)
+      ctx.fillStyle = "#fff"; ctx.strokeStyle = "#e8e4db"; ctx.lineWidth = 1
+      ctx.beginPath(); ctx.roundRect(mcX+pad, medBoxY, mcW-pad*2, medBoxH, 10)
+      ctx.fill(); ctx.stroke()
+
+      ctx.font = `600 ${fs(7.5)} 'DM Sans',sans-serif`; ctx.fillStyle = "#9a9a90"; ctx.textAlign = "left"
+      ctx.fillText("PRESCRIBED MEDICINES", mcX+pad+Math.round(12*scale), medBoxY+Math.round(17*scale))
+
+      const medicines = [
+        { name:"Amoxicillin 500mg",  note:"3× daily · 5 days",    delay:.25 },
+        { name:"Paracetamol 650mg",  note:"2× daily · 3 days",    delay:.55 },
+        { name:"Vitamin D3 1000IU",  note:"Once daily · 30 days", delay:.85 },
+      ]
+      const rowH = Math.round(34*scale)
+      medicines.forEach(({ name, note, delay }, i) => {
+        const medProg = Math.max(0, Math.min(1, (T-delay)*2.5))
+        if (medProg < .01) return
+        const my = medBoxY + Math.round(28*scale) + i*rowH
+        ctx.save(); ctx.globalAlpha = medProg
+        ctx.fillStyle = "#f8f7f4"
+        ctx.beginPath(); ctx.roundRect(mcX+pad+Math.round(8*scale), my, mcW-pad*2-Math.round(16*scale), rowH-4, 7); ctx.fill()
+        ctx.fillStyle = "#0d9488"
+        ctx.beginPath(); ctx.roundRect(mcX+pad+Math.round(8*scale), my, 3, rowH-4, [3,0,0,3]); ctx.fill()
+        ctx.font = `600 ${fs(10)} 'DM Sans',sans-serif`; ctx.fillStyle = "#1a1a18"; ctx.textAlign = "left"
+        ctx.fillText(name, mcX+pad+Math.round(20*scale), my+Math.round(13*scale))
+        ctx.font = `400 ${fs(8.5)} 'DM Sans',sans-serif`; ctx.fillStyle = "#9a9a90"
+        ctx.fillText(note, mcX+pad+Math.round(20*scale), my+Math.round(24*scale))
+        ctx.restore()
+      })
+
+      // Send button
+      const btnProg = Math.max(0, Math.min(1, (T-1.3)*3))
+      const btnY = mcY+mcH-pad-Math.round(32*scale)
+      ctx.save(); ctx.globalAlpha = btnProg
+      const g = ctx.createLinearGradient(mcX+pad, 0, mcX+mcW-pad, 0)
+      g.addColorStop(0,"#22c55e"); g.addColorStop(1,"#16a34a")
+      ctx.fillStyle = g
+      ctx.beginPath(); ctx.roundRect(mcX+pad, btnY, mcW-pad*2, Math.round(32*scale), 8); ctx.fill()
+      ctx.font = `600 ${fs(10.5)} 'DM Sans',sans-serif`; ctx.fillStyle = "#fff"; ctx.textAlign = "center"
+      ctx.fillText("▶  Send via WhatsApp", mcX+pad+(mcW-pad*2)/2, btnY+Math.round(21*scale))
+      ctx.restore()
+      ctx.restore()
+
+      // ── WHATSAPP NOTIFICATION (floating, above window) ────────────
+      const waProg = Math.max(0, Math.min(1, (T-1.6)*2.5))
+      if (waProg > .01) {
+        const waFloat = Math.sin(T*.75)*4
+        const waX = winX+winW-Math.round(12*scale)
+        const waY = winY - Math.round(28*scale) + waFloat
+        const waW = Math.round(220*scale), waH = Math.round(72*scale)
+        ctx.save(); ctx.globalAlpha = waProg
+        ctx.shadowColor = "rgba(0,0,0,0.14)"; ctx.shadowBlur = 24; ctx.shadowOffsetY = 8
+        ctx.fillStyle = "#fff"
+        ctx.beginPath(); ctx.roundRect(waX-waW, waY-waH/2, waW, waH, 14); ctx.fill()
+        ctx.shadowBlur=0; ctx.shadowOffsetY=0
+        // WA icon
+        const icR = Math.round(18*scale)
+        ctx.fillStyle="#22c55e"
+        ctx.beginPath(); ctx.arc(waX-waW+pad+icR/2, waY, icR, 0, Math.PI*2); ctx.fill()
+        ctx.font=`700 ${fs(11)} 'DM Sans',sans-serif`; ctx.fillStyle="#fff"; ctx.textAlign="center"
+        ctx.fillText("W", waX-waW+pad+icR/2, waY+Math.round(4*scale))
+        // Text
+        const tx = waX-waW+pad+icR+Math.round(12*scale)
+        ctx.textAlign="left"
+        ctx.font=`700 ${fs(11)} 'DM Sans',sans-serif`; ctx.fillStyle="#1a1a18"
+        ctx.fillText("Prescription Delivered", tx, waY-Math.round(8*scale))
+        ctx.font=`400 ${fs(9.5)} 'DM Sans',sans-serif`; ctx.fillStyle="#9a9a90"
+        ctx.fillText("Ramesh Kumar · Just now", tx, waY+Math.round(10*scale))
+        ctx.font=`500 ${fs(9.5)} 'DM Sans',sans-serif`; ctx.fillStyle="#0d9488"; ctx.textAlign="right"
+        ctx.fillText("✓✓", waX-Math.round(12*scale), waY+Math.round(28*scale))
+        // Unread dot
+        ctx.beginPath(); ctx.arc(waX-Math.round(8*scale), waY-waH/2+Math.round(8*scale), Math.round(6*scale), 0, Math.PI*2)
+        ctx.fillStyle="#22c55e"; ctx.fill()
+        ctx.restore()
+      }
+
+      // ── PATIENT Rx CARD (floating, lower-left of window) ──────────
+      const cardProg = Math.max(0, Math.min(1, T*1.8))
+      if (cardProg > .01) {
+        const cf = Math.sin(T*.85)*4
+        const cX = winX - Math.round(14*scale)
+        const cY = winY + winH - Math.round(60*scale) + cf
+        const cW = Math.round(170*scale), cH = Math.round(72*scale)
+        ctx.save(); ctx.globalAlpha = cardProg
+        ctx.shadowColor="rgba(0,0,0,0.15)"; ctx.shadowBlur=20; ctx.shadowOffsetY=6
+        ctx.fillStyle="#fff"
+        ctx.beginPath(); ctx.roundRect(cX, cY, cW, cH, 12); ctx.fill()
+        ctx.shadowBlur=0; ctx.shadowOffsetY=0
+        ctx.fillStyle="#0d9488"
+        ctx.beginPath(); ctx.roundRect(cX, cY, 4, cH, [12,0,0,12]); ctx.fill()
+        const cp = Math.round(14*scale)
+        ctx.font=`800 ${fs(15)} 'DM Sans',sans-serif`; ctx.fillStyle="#0d9488"; ctx.textAlign="left"
+        ctx.fillText("Rx", cX+cp, cY+Math.round(22*scale))
+        ctx.font=`600 ${fs(10)} 'DM Sans',sans-serif`; ctx.fillStyle="#1a1a18"
+        ctx.fillText("Ramesh Kumar", cX+cp, cY+Math.round(38*scale))
+        ctx.font=`400 ${fs(8.5)} 'DM Sans',sans-serif`; ctx.fillStyle="#9a9a90"
+        ctx.fillText("Amoxicillin · 3 medicines", cX+cp, cY+Math.round(52*scale))
+        ctx.restore()
+      }
 
       T += 1/60
       animId = requestAnimationFrame(draw)
@@ -615,11 +779,6 @@ function useEcoCanvas(ref: React.RefObject<HTMLCanvasElement>) {
 
     const CONVEYOR_ICONS = [0, 1, 2, 3, 0, 1, 2, 3]
     const ICON_SPACING = 90, ICON_R = 34, SPEED = 40
-    const CONVEYOR_Y_CENTER = H * 0.5, CONVEYOR_H = ICON_R * 2 + 16
-    const GATE_X = W * 0.56, PROC_X = W * 0.58
-    const GEAR_TOP_X = W * 0.815, GEAR_TOP_Y = H * 0.18
-    const GEAR_BOT_X = W * 0.815, GEAR_BOT_Y = H * 0.78
-    const GEAR_R = W * 0.075, BELT_X = W * 0.76
 
     function drawRoundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number, fill?: string, stroke?: string) {
       ctx.beginPath(); ctx.roundRect(x, y, w, h, r)
@@ -778,6 +937,78 @@ function useEcoCanvas(ref: React.RefObject<HTMLCanvasElement>) {
 /* ─── Data ────────────────────────────────────────────────────────────────────── */
 const CLINICS = ["City Clinic", "Sharma Hospital", "Apollo Pharmacy", "MediCare Centre", "Dr. Iyer's Practice", "Wellness Hub", "Green Cross", "HealthFirst", "Prime Diagnostics"]
 
+const testimonials = [
+  {
+    quote: "We switched from paper prescriptions six months ago. Our pharmacists now process prescriptions 3× faster and patients love getting their Rx on WhatsApp instantly.",
+    name: "Dr. Ramesh Iyer",
+    role: "General Physician · Apollo Clinic, Chennai",
+    initials: "RI",
+    featured: false,
+  },
+  {
+    quote: "The multi-language support is a game changer for our patient base. We serve Hindi, Tamil, and Telugu speaking patients — this platform handles all three without any extra setup.",
+    name: "Dr. Priya Sharma",
+    role: "Paediatrician · Sharma Hospital, Hyderabad",
+    initials: "PS",
+    featured: true,
+  },
+  {
+    quote: "Managing 4 hospitals from one dashboard used to be a nightmare. Now our org admin has full visibility across all locations and staff in real-time.",
+    name: "Vikram Nair",
+    role: "Operations Head · MediCare Group, Kochi",
+    initials: "VN",
+    featured: false,
+  },
+  {
+    quote: "Our pharmacists used to manually call patients with medicine instructions. Now they just click send and the patient gets the full prescription video on their phone.",
+    name: "Anita Kulkarni",
+    role: "Chief Pharmacist · City Clinic, Pune",
+    initials: "AK",
+    featured: false,
+  },
+  {
+    quote: "Setup took less than 20 minutes. We had our whole team onboarded and the first prescription sent within the same day. The UX is incredibly intuitive.",
+    name: "Dr. Suresh Babu",
+    role: "Cardiologist · HealthFirst, Bengaluru",
+    initials: "SB",
+    featured: false,
+  },
+  {
+    quote: "The QR code feature is brilliant. Patients scan it in the pharmacy and the pharmacist sees the complete prescription — no more misread handwriting.",
+    name: "Dr. Meera Joshi",
+    role: "Dermatologist · Wellness Hub, Mumbai",
+    initials: "MJ",
+    featured: false,
+  },
+]
+
+const faqs = [
+  {
+    q: "Is there a free plan available?",
+    a: "Yes. Our Free plan supports up to 10 prescriptions per month and 2 team members with no credit card required. You can upgrade any time as your clinic grows.",
+  },
+  {
+    q: "Which languages are supported for prescriptions?",
+    a: "We support English, Hindi, Tamil, Telugu, Kannada, Malayalam, and Marathi. Language is set per-prescription so you can serve a multilingual patient base from the same account.",
+  },
+  {
+    q: "How does WhatsApp delivery work?",
+    a: "When a prescription is ready, the patient receives a WhatsApp message with a secure link and QR code. No app download is needed — it opens in any browser.",
+  },
+  {
+    q: "Can I manage multiple hospitals under one account?",
+    a: "Yes. The Pro and Enterprise plans support multiple hospitals under a single organization. Each hospital has its own staff, roles, and prescription history.",
+  },
+  {
+    q: "Is patient data secure?",
+    a: "All data is encrypted in transit and at rest. Prescription links use time-limited access tokens and we comply with India's DPDP Act requirements for healthcare data.",
+  },
+  {
+    q: "Can I try Pro before committing?",
+    a: "Yes — Pro comes with a 14-day free trial. No credit card required upfront. You can cancel or downgrade to Free at any time before the trial ends.",
+  },
+]
+
 const plans = [
   {
     name: "Free", price: "₹0", period: "/month",
@@ -819,21 +1050,22 @@ function Ticker() {
 
 function Navbar({ onLogin }: { onLogin: () => void }) {
   return (
-    <nav className="ms-nav">
-      <div className="ms-logo" onClick={onLogin}>
-        <div className="ms-logo-icon"><span>Rx</span></div>
-        Medi lingua vani
-      </div>
-      <ul className="ms-nav-links">
-        {["Features", "Pricing", "About"].map(l => (
-          <li key={l}><a href={`#${l.toLowerCase()}`}>{l}</a></li>
-        ))}
-      </ul>
-      <div className="ms-nav-actions">
-        <button className="ms-btn-ghost" onClick={onLogin}>Log In</button>
-        <button className="ms-btn-solid" onClick={onLogin}>Start Free</button>
-      </div>
-    </nav>
+    <div className="ms-nav-wrap">
+      <nav className="ms-nav">
+        <div className="ms-logo" onClick={onLogin}>
+          <div className="ms-logo-icon"><span>Rx</span></div>
+        </div>
+        <ul className="ms-nav-links">
+          {["Features", "Pricing", "About"].map(l => (
+            <li key={l}><a href={`#${l.toLowerCase()}`}>{l}</a></li>
+          ))}
+        </ul>
+        <div className="ms-nav-actions">
+          <button className="ms-btn-ghost" onClick={onLogin}>Log In</button>
+          <button className="ms-btn-solid" onClick={onLogin}>Start Free</button>
+        </div>
+      </nav>
+    </div>
   )
 }
 
@@ -990,6 +1222,118 @@ function Footer() {
   )
 }
 
+const containerVariants = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.1 } },
+}
+
+const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1]
+
+const cardVariants = {
+  hidden:  { opacity: 0, y: 32 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: EASE } },
+}
+
+const headerVariants = {
+  hidden:  { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.55, ease: EASE } },
+}
+
+function TestimonialsSection() {
+  const sectionRef = useRef<HTMLDivElement>(null)
+  const isInView = useInView(sectionRef, { once: true, margin: "-80px" })
+
+  return (
+    <section id="testimonials" className="ms-testimonials" ref={sectionRef}>
+      <div className="ms-testimonials-inner">
+        <motion.div
+          className="ms-section-header"
+          variants={headerVariants}
+          initial="hidden"
+          animate={isInView ? "visible" : "hidden"}
+        >
+          <h2>Trusted by clinics across India</h2>
+          <p>Here's what doctors and pharmacists say after switching to Medi lingua vani.</p>
+        </motion.div>
+
+        <motion.div
+          className="ms-testi-grid"
+          variants={containerVariants}
+          initial="hidden"
+          animate={isInView ? "visible" : "hidden"}
+        >
+          {testimonials.map((t) => (
+            <motion.div
+              key={t.name}
+              className={`ms-testi-card${t.featured ? " featured-t" : ""}`}
+              variants={cardVariants}
+              whileHover={{ y: -4, boxShadow: "0 12px 40px rgba(0,0,0,0.10)" }}
+              transition={{ duration: 0.22 }}
+            >
+              <div className="ms-testi-stars">
+                {[1,2,3,4,5].map(s => <span key={s} className="ms-testi-star">★</span>)}
+              </div>
+              <p className="ms-testi-quote">"{t.quote}"</p>
+              <div className="ms-testi-footer">
+                <div className="ms-testi-avatar">{t.initials}</div>
+                <div>
+                  <div className="ms-testi-name">{t.name}</div>
+                  <div className="ms-testi-role">{t.role}</div>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </motion.div>
+      </div>
+    </section>
+  )
+}
+
+function FAQSection() {
+  const [open, setOpen] = useState<number | null>(null)
+  const toggle = (i: number) => setOpen(prev => prev === i ? null : i)
+  return (
+    <section id="faq" className="ms-faq">
+      <div className="ms-faq-inner">
+        <div className="ms-section-header">
+          <h2>Frequently asked questions</h2>
+          <p>Everything you need to know before getting started.</p>
+        </div>
+        <div className="ms-faq-list">
+          {faqs.map((item, i) => (
+            <div key={i} className="ms-faq-item">
+              <button className="ms-faq-q" onClick={() => toggle(i)}>
+                {item.q}
+                <span className={`ms-faq-icon${open === i ? " open" : ""}`}>+</span>
+              </button>
+              {open === i && <p className="ms-faq-a">{item.a}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function CTASection({ onLogin }: { onLogin: () => void }) {
+  return (
+    <section className="ms-cta-section">
+      <div className="ms-cta-card">
+        <h2>
+          Start digitising your clinic
+          <em>today — it's free</em>
+        </h2>
+        <p>Join 500+ clinics already sending prescriptions via WhatsApp. No setup fees, no credit card required.</p>
+        <div className="ms-cta-btns">
+          <button className="ms-cta-btn-p" onClick={onLogin}>Get Started Free</button>
+          <button className="ms-cta-btn-s" onClick={() => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })}>View Pricing</button>
+        </div>
+        <p className="ms-cta-note">Free plan includes 10 prescriptions/month · No credit card required</p>
+      </div>
+    </section>
+  )
+}
+
 /* ─── Page ────────────────────────────────────────────────────────────────────── */
 export default function LandingPage() {
   const navigate = useNavigate()
@@ -1001,7 +1345,10 @@ export default function LandingPage() {
       <Ticker />
       <FeaturesSection />
       <WorkflowSection />
+      <TestimonialsSection />
       <PricingSection onLogin={goLogin} />
+      <FAQSection />
+      <CTASection onLogin={goLogin} />
       <Footer />
     </>
   )

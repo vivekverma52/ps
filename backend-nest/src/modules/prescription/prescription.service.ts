@@ -14,16 +14,23 @@ import { MYSQL_POOL } from '../../database/database.module';
 import { AppError } from '../../common/errors/app.error';
 import { S3Service } from '../../common/s3/s3.service';
 import { SqsService } from '../../common/sqs/sqs.service';
+import { WhatsAppService } from '../../common/whatsapp/whatsapp.service';
 import { Prescription, PrescriptionDocument } from './schemas/prescription.schema';
 import {
   MedicinePrescription,
   MedicinePrescriptionDocument,
 } from './schemas/medicine-prescription.schema';
 
-const VALID_STATUSES = ['UPLOADED', 'RENDERED', 'SENT'];
+const VALID_STATUSES = ['UPLOADED', 'CLAIMED', 'PROCESSING', 'RENDERED', 'SENT'];
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parsePagination(page?: string, limit?: string): { pageNum: number; limitNum: number } {
+  const pageNum  = Math.max(1, parseInt(page  || '1',  10) || 1);
+  const limitNum = Math.min(100, Math.max(1, parseInt(limit || '20', 10) || 20));
+  return { pageNum, limitNum };
 }
 
 function generatePatientUid(orgId: string | null, hospitalId: string | null, doctorId: string, rxId: string): string {
@@ -70,6 +77,7 @@ export class PrescriptionService implements OnModuleInit {
     private readonly s3Service: S3Service,
     private readonly sqsService: SqsService,
     private readonly configService: ConfigService,
+    private readonly whatsAppService: WhatsAppService,
   ) {}
 
   onModuleInit() {
@@ -172,10 +180,27 @@ export class PrescriptionService implements OnModuleInit {
       status,
     };
 
+    // ── Back-fill patient_name / patient_phone from OCR if still placeholders ──
+    // When a doctor does a "quick upload" they leave name="Quick Upload" and
+    // phone="0000000000".  OCR often extracts the real values — write them back
+    // to the top-level fields so the list view and WhatsApp dispatch use real data.
+    const patientDetails = extractedData?.patient_details ?? {};
+    const ocrName  = (patientDetails.name    as string | undefined)?.trim();
+    const ocrPhone = ((patientDetails.phone ?? patientDetails.contact) as string | undefined)?.trim();
+
+    const topLevel: Record<string, string> = {};
+    if (ocrName  && prescription.patient_name  === 'Quick Upload')  topLevel.patient_name  = ocrName;
+    if (ocrPhone && prescription.patient_phone === '0000000000')    topLevel.patient_phone = ocrPhone;
+
+    const updateDoc: Record<string, any> = { interpreted_data: newInterpretedData, ...topLevel };
     await this.prescriptionModel.updateOne(
       { id: prescription.id },
-      { $set: { interpreted_data: newInterpretedData } },
+      { $set: updateDoc },
     );
+
+    if (Object.keys(topLevel).length > 0) {
+      this.logger.log(`[SQS Consumer] Patient details back-filled from OCR — ${JSON.stringify(topLevel)}`);
+    }
     this.logger.log(`[SQS Consumer] OCR data saved — ${processingSummary?.medicinesFound ?? 0} medicines found`);
   }
 
@@ -242,6 +267,30 @@ export class PrescriptionService implements OnModuleInit {
       { $set: { video_key: videoKey, status: 'RENDERED' } },
     );
     this.logger.log(`[Video Consumer] Video saved — prescription=${prescription.id} key=${videoKey}`);
+
+    // ── WhatsApp notification ─────────────────────────────────────────────────
+    // Skip placeholder phones (quick-upload before OCR/manual edit fills the real number)
+    const phone = prescription.patient_phone as string | undefined;
+    if (phone && phone !== '0000000000') {
+      try {
+        const videoShareUrl = await this.s3Service.getPresignedViewUrl(videoKey);
+        const waResult = await this.whatsAppService.sendVideoReady(
+          phone,
+          (prescription.patient_name as string | undefined) ?? 'Patient',
+          videoShareUrl,
+        );
+        if (waResult.success) {
+          this.logger.log(`[Video Consumer] WhatsApp sent to ${phone}`);
+        } else {
+          this.logger.warn(`[Video Consumer] WhatsApp skipped/failed — reason=${waResult.error}`);
+        }
+      } catch (err: any) {
+        // Non-fatal — video is already saved; only WhatsApp notification failed
+        this.logger.error(`[Video Consumer] WhatsApp dispatch error: ${err.message}`);
+      }
+    } else {
+      this.logger.log(`[Video Consumer] Skipping WhatsApp — phone is placeholder or missing`);
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -341,8 +390,7 @@ export class PrescriptionService implements OnModuleInit {
     page?: string; limit?: string; search?: string; status?: string;
   }) {
     const { role, userId, orgId, hospitalId } = params;
-    const pageNum  = Math.max(1, parseInt(params.page  || '1',  10) || 1);
-    const limitNum = Math.min(100, Math.max(1, parseInt(params.limit || '20', 10) || 20));
+    const { pageNum, limitNum } = parsePagination(params.page, params.limit);
 
     let filter: any = {};
     if (role === 'DOCTOR')           filter = { doctor_id: userId };
@@ -370,35 +418,35 @@ export class PrescriptionService implements OnModuleInit {
     return { data: docs.map((d) => this.withUrls(d)), total, page: pageNum, limit: limitNum };
   }
 
-  async getPrescriptionById(id: string, params: { role: string; userId: string; orgId: string | null }) {
+  async getPrescriptionById(id: string, params: { role: string; userId: string; orgId: string | null; hospitalId?: string | null }) {
     if (!id) throw AppError.badRequest('Prescription ID is required');
-    const { role, userId, orgId } = params;
 
     const prescription = await this.prescriptionModel
       .findOne({ $or: [{ id }, { access_token: id }] })
       .lean();
 
     if (!prescription) throw AppError.notFound('Prescription');
-    if (role === 'DOCTOR'     && prescription.doctor_id !== userId)       throw AppError.forbidden();
-    if (role === 'PHARMACIST' && orgId && prescription.org_id !== orgId)  throw AppError.forbidden();
+    this.assertPrescriptionAccess(prescription, params);
 
     return this.withUrls(prescription);
   }
 
-  async saveInterpretedData(id: string, data: any) {
+  async saveInterpretedData(id: string, data: any, actor: { role: string; userId: string; orgId: string | null; hospitalId?: string | null }) {
     const prescription = await this.prescriptionModel
       .findOne({ $or: [{ id }, { access_token: id }] }).lean();
     if (!prescription) throw AppError.notFound('Prescription');
+    this.assertPrescriptionAccess(prescription, actor);
 
     await this.prescriptionModel.updateOne({ id: prescription.id }, { $set: { interpreted_data: data } });
     return { message: 'Interpreted data saved' };
   }
 
-  async updateRender(id: string, _actorId: string, video_url?: string) {
+  async updateRender(id: string, actor: { role: string; userId: string; orgId: string | null; hospitalId?: string | null }, video_url?: string) {
     const prescription = await this.prescriptionModel
       .findOne({ $or: [{ id }, { access_token: id }] })
       .lean();
     if (!prescription) throw AppError.notFound('Prescription');
+    this.assertPrescriptionAccess(prescription, actor);
 
     let videoKey: string | null = null;
     if (video_url?.trim()) {
@@ -495,10 +543,10 @@ export class PrescriptionService implements OnModuleInit {
     return this.withUrls(updated);
   }
 
-  async updatePatientDetails(prescriptionId: string, actorOrgId: string, body: { patient_name?: string; patient_phone?: string }) {
-    this.logger.log(`[PATIENT:UPDATE] prescriptionId=${prescriptionId} orgId=${actorOrgId}`);
+  async updatePatientDetails(prescriptionId: string, actor: { role: string; userId: string; orgId: string | null; hospitalId?: string | null }, body: { patient_name?: string; patient_phone?: string }) {
+    this.logger.log(`[PATIENT:UPDATE] prescriptionId=${prescriptionId} orgId=${actor.orgId} hospitalId=${actor.hospitalId}`);
     const doc = await this.getPrescriptionRaw(prescriptionId);
-    if (doc.org_id && doc.org_id !== actorOrgId) throw AppError.forbidden('Prescription belongs to a different organization');
+    this.assertPrescriptionAccess(doc, actor);
 
     const updates: Record<string, string> = {};
     if (body.patient_name?.trim())  updates.patient_name  = body.patient_name.trim();
@@ -511,8 +559,8 @@ export class PrescriptionService implements OnModuleInit {
     return this.withUrls(updated);
   }
 
-  async updateStatus(id: string, params: { userId: string; role: string; orgId: string | null; status: string }) {
-    const { userId, role, orgId, status } = params;
+  async updateStatus(id: string, params: { userId: string; role: string; orgId: string | null; hospitalId?: string | null; status: string }) {
+    const { role, status } = params;
     if (!status) throw AppError.validation('Status is required');
 
     const upperStatus = status.toUpperCase();
@@ -524,12 +572,10 @@ export class PrescriptionService implements OnModuleInit {
       .lean();
     if (!prescription) throw AppError.notFound('Prescription');
 
-    if (role === 'PHARMACIST') {
-      if (upperStatus !== 'SENT') throw AppError.forbidden('Pharmacist can only mark a prescription as SENT');
-      if (orgId && prescription.org_id !== orgId) throw AppError.forbidden();
-    } else {
-      if (prescription.doctor_id !== userId) throw AppError.forbidden();
-    }
+    if (role === 'PHARMACIST' && upperStatus !== 'SENT')
+      throw AppError.forbidden('Pharmacist can only mark a prescription as SENT');
+
+    this.assertPrescriptionAccess(prescription, params);
 
     await this.prescriptionModel.updateOne({ id: prescription.id }, { $set: { status: upperStatus } });
     return { message: 'Status updated' };
@@ -565,14 +611,12 @@ export class PrescriptionService implements OnModuleInit {
     };
   }
 
-  async getVideoDownloadUrl(id: string, params: { role: string; userId: string; orgId: string | null }) {
-    const { role, userId, orgId } = params;
+  async getVideoDownloadUrl(id: string, params: { role: string; userId: string; orgId: string | null; hospitalId?: string | null }) {
     const prescription = await this.prescriptionModel
       .findOne({ $or: [{ id }, { access_token: id }] })
       .lean();
     if (!prescription) throw AppError.notFound('Prescription');
-    if (role === 'DOCTOR'     && prescription.doctor_id !== userId)      throw AppError.forbidden();
-    if (role === 'PHARMACIST' && orgId && prescription.org_id !== orgId) throw AppError.forbidden();
+    this.assertPrescriptionAccess(prescription, params);
     if (!prescription.video_key) throw AppError.badRequest('Video not ready yet');
 
     const filename = `rx-${prescription.patient_name.replace(/\s+/g, '-')}.mp4`;
@@ -590,16 +634,48 @@ export class PrescriptionService implements OnModuleInit {
     return doc;
   }
 
-  async addMedicineToRx(prescriptionId: string, actorOrgId: string, body: { name: string; quantity?: string; frequency: string; course: string; description?: string }) {
-    this.logger.log(`[MEDICINE:ADD] prescriptionId=${prescriptionId} orgId=${actorOrgId} name="${body.name}"`);
+  /**
+   * Central access-control check for every prescription mutation/read.
+   *
+   * Rules:
+   *  DOCTOR      — must own the prescription (doctor_id match)
+   *  PHARMACIST  — if the JWT carries a hospitalId, the prescription must
+   *                belong to that hospital.  Hospital A pharmacist can NEVER
+   *                touch Hospital B prescriptions, even within the same org.
+   *                Org-level pharmacists (no hospitalId) fall back to org check.
+   *  Everything  — org_id must match (catches ORG_ADMIN, HOSPITAL_ADMIN, etc.)
+   */
+  private assertPrescriptionAccess(
+    doc: any,
+    actor: { role: string; userId: string; orgId: string | null; hospitalId?: string | null },
+  ): void {
+    if (actor.role === 'DOCTOR') {
+      if (doc.doctor_id !== actor.userId) throw AppError.forbidden();
+      return;
+    }
+
+    if (actor.role === 'PHARMACIST') {
+      if (actor.hospitalId) {
+        // Hospital-scoped pharmacist — strict hospital match
+        if (doc.hospital_id !== actor.hospitalId) throw AppError.forbidden();
+      } else {
+        // Org-level pharmacist — org match
+        if (actor.orgId && doc.org_id !== actor.orgId) throw AppError.forbidden();
+      }
+      return;
+    }
+
+    // ORG_ADMIN, HOSPITAL_ADMIN and any other role — org-level check
+    if (actor.orgId && doc.org_id !== actor.orgId) throw AppError.forbidden();
+  }
+
+  async addMedicineToRx(prescriptionId: string, actor: { role: string; userId: string; orgId: string | null; hospitalId?: string | null }, body: { name: string; quantity?: string; frequency: string; course: string; description?: string }) {
+    this.logger.log(`[MEDICINE:ADD] prescriptionId=${prescriptionId} orgId=${actor.orgId} hospitalId=${actor.hospitalId} name="${body.name}"`);
     if (!body.name?.trim() || !body.frequency?.trim() || !body.course?.trim())
       throw AppError.badRequest('name, frequency and course are required');
 
     const doc = await this.getPrescriptionRaw(prescriptionId);
-    if (doc.org_id && doc.org_id !== actorOrgId) {
-      this.logger.warn(`[MEDICINE:ADD] Forbidden — rx orgId=${doc.org_id} actor orgId=${actorOrgId}`);
-      throw AppError.forbidden('Prescription belongs to a different organization');
-    }
+    this.assertPrescriptionAccess(doc, actor);
 
     const hasInterpretedData = !!doc.interpreted_data;
     this.logger.log(`[MEDICINE:ADD] interpreted_data exists=${hasInterpretedData} prescriptionId=${prescriptionId}`);
@@ -627,15 +703,12 @@ export class PrescriptionService implements OnModuleInit {
     return med;
   }
 
-  async updateMedicineInRx(prescriptionId: string, medicineId: string, actorOrgId: string, body: { name?: string; quantity?: string; frequency?: string; course?: string; description?: string }) {
-    this.logger.log(`[MEDICINE:UPDATE] prescriptionId=${prescriptionId} medicineId=${medicineId} orgId=${actorOrgId}`);
+  async updateMedicineInRx(prescriptionId: string, medicineId: string, actor: { role: string; userId: string; orgId: string | null; hospitalId?: string | null }, body: { name?: string; quantity?: string; frequency?: string; course?: string; description?: string }) {
+    this.logger.log(`[MEDICINE:UPDATE] prescriptionId=${prescriptionId} medicineId=${medicineId} orgId=${actor.orgId} hospitalId=${actor.hospitalId}`);
     if (Object.keys(body).length === 0) throw AppError.badRequest('No fields provided to update');
 
     const doc = await this.getPrescriptionRaw(prescriptionId);
-    if (doc.org_id && doc.org_id !== actorOrgId) {
-      this.logger.warn(`[MEDICINE:UPDATE] Forbidden — rx orgId=${doc.org_id} actor orgId=${actorOrgId}`);
-      throw AppError.forbidden('Prescription belongs to a different organization');
-    }
+    this.assertPrescriptionAccess(doc, actor);
     const medicines: any[] = Array.isArray(doc.interpreted_data?.medicines)
       ? doc.interpreted_data.medicines : [];
 
@@ -662,13 +735,10 @@ export class PrescriptionService implements OnModuleInit {
     return medicines[idx];
   }
 
-  async deleteMedicineFromRx(prescriptionId: string, medicineId: string, actorOrgId: string) {
-    this.logger.log(`[MEDICINE:DELETE] prescriptionId=${prescriptionId} medicineId=${medicineId} orgId=${actorOrgId}`);
+  async deleteMedicineFromRx(prescriptionId: string, medicineId: string, actor: { role: string; userId: string; orgId: string | null; hospitalId?: string | null }) {
+    this.logger.log(`[MEDICINE:DELETE] prescriptionId=${prescriptionId} medicineId=${medicineId} orgId=${actor.orgId} hospitalId=${actor.hospitalId}`);
     const doc = await this.getPrescriptionRaw(prescriptionId);
-    if (doc.org_id && doc.org_id !== actorOrgId) {
-      this.logger.warn(`[MEDICINE:DELETE] Forbidden — rx orgId=${doc.org_id} actor orgId=${actorOrgId}`);
-      throw AppError.forbidden('Prescription belongs to a different organization');
-    }
+    this.assertPrescriptionAccess(doc, actor);
     const medicines: any[] = Array.isArray(doc.interpreted_data?.medicines)
       ? doc.interpreted_data.medicines : [];
 
@@ -734,8 +804,7 @@ export class PrescriptionService implements OnModuleInit {
   }
 
   async listMedicineLibrary(query: { page?: string; limit?: string; search?: string; drug_category?: string }) {
-    const pageNum  = Math.max(1, parseInt(query.page  || '1',  10) || 1);
-    const limitNum = Math.min(100, Math.max(1, parseInt(query.limit || '20', 10) || 20));
+    const { pageNum, limitNum } = parsePagination(query.page, query.limit);
     const filter: any = {};
     if (query.search?.trim()) {
       const safe = escapeRegex(query.search.trim());

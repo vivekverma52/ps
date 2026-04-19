@@ -30,6 +30,36 @@ export default function PrescriptionDetailPage() {
   const navigate = useNavigate()
   const [prescription, setPrescription] = useState<Prescription | null>(null)
   const [loading, setLoading] = useState(true)
+  const [editing, setEditing] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const startEdit = () => {
+    setEditName(prescription?.patient_name ?? '')
+    setEditPhone(prescription?.patient_phone ?? '')
+    setEditing(true)
+  }
+
+  const cancelEdit = () => setEditing(false)
+
+  const saveEdit = async () => {
+    if (!editName.trim()) { toast.error('Patient name is required'); return }
+    setSaving(true)
+    try {
+      const res = await api.put(`/prescriptions/${id}/patient-details`, {
+        patient_name:  editName.trim(),
+        patient_phone: editPhone.trim(),
+      })
+      setPrescription(prev => prev ? { ...prev, ...res.data.data } : prev)
+      setEditing(false)
+      toast.success('Patient details updated')
+    } catch {
+      toast.error('Failed to update patient details')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   useEffect(() => {
     api.get(`/prescriptions/${id}`)
@@ -97,27 +127,74 @@ export default function PrescriptionDetailPage() {
 
           {/* Patient info */}
           <div className="card" style={{ padding: '18px 20px' }}>
-            <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: 'var(--ink-light)', marginBottom: 12 }}>
-              Patient Details
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              {[
-                ['Doctor', `Dr. ${prescription.doctor_name}`],
-                ['Patient', prescription.patient_name],
-                ['Mobile', prescription.patient_phone || '—'],
-                ['Language', prescription.language],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 4 }}>{label}</p>
-                  <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)', background: 'var(--cell)', padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)' }}>
-                    {value}
-                  </p>
-                </div>
-              ))}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <p style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.6px', textTransform: 'uppercase', color: 'var(--ink-light)' }}>
+                Patient Details
+              </p>
+              {!editing && (
+                <button onClick={startEdit} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: 'var(--teal)', background: 'var(--teal-light)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                  </svg>
+                  Edit
+                </button>
+              )}
             </div>
-            <p style={{ fontSize: 11, color: 'var(--ink-light)', marginTop: 10 }}>
-              {new Date(prescription.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-            </p>
+
+            {editing ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 4 }}>Patient Name</p>
+                  <input
+                    className="input-field"
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    placeholder="Patient name"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 4 }}>Mobile Number</p>
+                  <input
+                    className="input-field"
+                    value={editPhone}
+                    onChange={e => setEditPhone(e.target.value)}
+                    placeholder="10-digit mobile number"
+                    type="tel"
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+                  <button className="btn btn-teal btn-sm" onClick={saveEdit} disabled={saving}>
+                    {saving ? 'Saving…' : 'Save'}
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={cancelEdit} disabled={saving}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  {[
+                    ['Doctor',   `Dr. ${prescription.doctor_name}`],
+                    ['Patient',  prescription.patient_name],
+                    ['Mobile',   prescription.patient_phone || '—'],
+                    ['Language', prescription.language],
+                  ].map(([label, value]) => (
+                    <div key={label}>
+                      <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 4 }}>{label}</p>
+                      <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--ink)', background: 'var(--cell)', padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                        {value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--ink-light)', marginTop: 10 }}>
+                  {new Date(prescription.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </p>
+              </>
+            )}
           </div>
 
           {/* Status info */}

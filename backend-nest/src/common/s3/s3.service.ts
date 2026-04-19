@@ -81,4 +81,13 @@ export class S3Service {
     });
     return getSignedUrl(this.s3, command, { expiresIn });
   }
+
+  /** Generate a pre-signed URL for inline viewing (e.g. WhatsApp video share). Default 72 h. */
+  async getPresignedViewUrl(key: string, expiresIn = 72 * 3600): Promise<string> {
+    const command = new GetObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+    });
+    return getSignedUrl(this.s3, command, { expiresIn });
+  }
 }
