@@ -16,8 +16,18 @@ const LONG_POLL_WAIT_SECONDS  = 20;
 const MAX_MESSAGES_PER_BATCH  = 10;
 const BASE_RETRY_DELAY_MS     = 1_000;   // 1 s — exponential backoff base
 const MAX_RETRY_DELAY_MS      = 60_000;  // cap at 60 s
+const AUTH_ERROR_DELAY_MS     = 5 * 60_000; // 5 min — no point hammering on bad creds
 const MAX_HANDLER_RETRIES     = 3;       // per-message handler retries before giving up
 const VISIBILITY_EXTENSION_S  = 60;      // extend visibility while handler retries
+
+// Auth/config errors that will never self-heal — back off long instead of retrying every 60 s
+const PERMANENT_ERROR_CODES = new Set([
+  'InvalidClientTokenId',
+  'ExpiredTokenException',
+  'AccessDeniedException',
+  'AuthFailure',
+  'InvalidSignatureException',
+]);
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -301,16 +311,27 @@ export class SqsService implements OnModuleDestroy {
         if (!state.active) break; // Graceful shutdown — not an error
 
         state.consecutiveErrors++;
-        const delay = this.backoffDelay(state.consecutiveErrors);
 
-        this.logger.error(
-          `[SQS:Consumer] Poll error (attempt ${state.consecutiveErrors}) — ` +
-          `queue=${this.queueLabel(queueUrl)} error=${err.name}: ${err.message} ` +
-          `retryIn=${delay}ms`,
-          err.stack,
-        );
-
-        await this.sleep(delay);
+        if (PERMANENT_ERROR_CODES.has(err.name)) {
+          // Auth/config error — will never self-heal on retry. Back off for 5 min,
+          // then try again in case credentials were rotated in the environment.
+          this.logger.error(
+            `[SQS:Consumer] Permanent auth error on queue=${this.queueLabel(queueUrl)}: ` +
+            `${err.name} — ${err.message}. ` +
+            `Fix AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY and restart. ` +
+            `Pausing ${AUTH_ERROR_DELAY_MS / 1000}s before next attempt.`,
+          );
+          await this.sleep(AUTH_ERROR_DELAY_MS);
+        } else {
+          const delay = this.backoffDelay(state.consecutiveErrors);
+          this.logger.error(
+            `[SQS:Consumer] Poll error (attempt ${state.consecutiveErrors}) — ` +
+            `queue=${this.queueLabel(queueUrl)} error=${err.name}: ${err.message} ` +
+            `retryIn=${delay}ms`,
+            err.stack,
+          );
+          await this.sleep(delay);
+        }
       }
     }
 

@@ -3,6 +3,8 @@
  * Covers: Superadmin management + Plans table
  */
 import { Injectable, Inject, Logger } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { Pool } from 'mysql2/promise';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
@@ -10,6 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { MYSQL_POOL } from '../../database/database.module';
 import { AppError } from '../../common/errors/app.error';
 import { PlatformRepository } from './platform.repository';
+import { Prescription, PrescriptionDocument } from '../prescription/schemas/prescription.schema';
 
 const VALID_STATUSES = ['ACTIVE', 'SUSPENDED'];
 
@@ -42,6 +45,7 @@ export class PlatformService {
   constructor(
     @Inject(MYSQL_POOL) private readonly pool: Pool,
     private readonly platformRepository: PlatformRepository,
+    @InjectModel(Prescription.name) private readonly prescriptionModel: Model<PrescriptionDocument>,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -70,37 +74,36 @@ export class PlatformService {
 
   async createPlan(dto: {
     name: 'FREE' | 'PRO' | 'GROWTH' | 'ENT';
-    display_name: string;
-    rx_limit: number;
-    team_limit: number;
-    hospital_limit: number;
-    price_monthly?: number;
+    max_prescriptions_per_month: number;
+    max_staff_per_hospital: number;
+    max_hospitals: number;
+    price?: number;
     features?: Record<string, any>;
   }) {
     const upper = dto.name.toUpperCase();
     const [existing]: any = await this.pool.execute('SELECT id FROM plans WHERE name = ?', [upper]);
     if (existing.length > 0) throw AppError.conflict('Plan with this name already exists');
 
-    const id = uuidv4();
+    const id   = uuidv4();
+    const slug = upper.toLowerCase() + '-' + crypto.randomBytes(3).toString('hex');
     await this.pool.execute(
-      `INSERT INTO plans (id, name, display_name, rx_limit, team_limit, hospital_limit, price_monthly, features)
+      `INSERT INTO plans (id, name, slug, max_prescriptions_per_month, max_staff_per_hospital, max_hospitals, price, features)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, upper, dto.display_name, dto.rx_limit, dto.team_limit, dto.hospital_limit,
-       dto.price_monthly ?? 0, dto.features ? JSON.stringify(dto.features) : null],
+      [id, upper, slug, dto.max_prescriptions_per_month, dto.max_staff_per_hospital, dto.max_hospitals,
+       dto.price ?? 0, dto.features ? JSON.stringify(dto.features) : null],
     );
     return this.getPlanById(id);
   }
 
-  async updatePlan(id: string, dto: Partial<{ display_name: string; rx_limit: number; team_limit: number; hospital_limit: number; price_monthly: number; features: any }>) {
+  async updatePlan(id: string, dto: Partial<{ max_prescriptions_per_month: number; max_staff_per_hospital: number; max_hospitals: number; price: number; features: any }>) {
     await this.getPlanById(id);
     const fields: string[] = [];
     const values: any[] = [];
-    if (dto.display_name   !== undefined) { fields.push('display_name = ?');   values.push(dto.display_name); }
-    if (dto.rx_limit       !== undefined) { fields.push('rx_limit = ?');       values.push(dto.rx_limit); }
-    if (dto.team_limit     !== undefined) { fields.push('team_limit = ?');     values.push(dto.team_limit); }
-    if (dto.hospital_limit !== undefined) { fields.push('hospital_limit = ?'); values.push(dto.hospital_limit); }
-    if (dto.price_monthly  !== undefined) { fields.push('price_monthly = ?');  values.push(dto.price_monthly); }
-    if (dto.features       !== undefined) { fields.push('features = ?');       values.push(JSON.stringify(dto.features)); }
+    if (dto.max_prescriptions_per_month !== undefined) { fields.push('max_prescriptions_per_month = ?'); values.push(dto.max_prescriptions_per_month); }
+    if (dto.max_staff_per_hospital      !== undefined) { fields.push('max_staff_per_hospital = ?');      values.push(dto.max_staff_per_hospital); }
+    if (dto.max_hospitals               !== undefined) { fields.push('max_hospitals = ?');               values.push(dto.max_hospitals); }
+    if (dto.price                       !== undefined) { fields.push('price = ?');                       values.push(dto.price); }
+    if (dto.features                    !== undefined) { fields.push('features = ?');                    values.push(JSON.stringify(dto.features)); }
     if (fields.length === 0) throw AppError.badRequest('No fields to update');
     values.push(id);
     await this.pool.execute(`UPDATE plans SET ${fields.join(', ')} WHERE id = ?`, values);
@@ -122,35 +125,45 @@ export class PlatformService {
   }
 
   async getDashboard() {
-    const [[orgStats]]: any = await this.pool.execute(
-      `SELECT COUNT(*) AS total,
-              SUM(status = 'ACTIVE')    AS active,
-              SUM(status = 'SUSPENDED') AS suspended
-       FROM organizations`,
-    );
-    const [[userStats]]: any  = await this.pool.execute('SELECT COUNT(*) AS total FROM users');
-    const [[presStats]]: any  = await this.pool.execute('SELECT COUNT(*) AS total FROM prescriptions');
-    const [[presMonth]]: any  = await this.pool.execute(
-      `SELECT COUNT(*) AS count FROM prescriptions
-       WHERE MONTH(created_at) = MONTH(NOW()) AND YEAR(created_at) = YEAR(NOW())`,
-    );
-    // Two derived-table JOINs replace the previous per-row correlated subqueries
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth   = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const [
+      [orgStats], [userStats],
+      totalPrescriptions, prescriptionsThisMonth,
+    ]: any = await Promise.all([
+      this.pool.execute(
+        `SELECT COUNT(*) AS total, SUM(status = 'ACTIVE') AS active, SUM(status = 'SUSPENDED') AS suspended FROM organizations`,
+      ).then(([rows]: any) => rows),
+      this.pool.execute('SELECT COUNT(*) AS total FROM users').then(([rows]: any) => rows),
+      this.prescriptionModel.countDocuments({}),
+      this.prescriptionModel.countDocuments({ created_at: { $gte: startOfMonth, $lt: endOfMonth } }),
+    ]);
+
     const [recentOrgs]: any = await this.pool.execute(
-      `SELECT o.*,
-         COALESCE(uc.user_count, 0)         AS user_count,
-         COALESCE(pc.prescription_count, 0) AS prescription_count
+      `SELECT o.*, COALESCE(uc.user_count, 0) AS user_count
        FROM organizations o
-       LEFT JOIN (SELECT org_id, COUNT(*) AS user_count         FROM users         GROUP BY org_id) uc ON uc.org_id = o.id
-       LEFT JOIN (SELECT org_id, COUNT(*) AS prescription_count FROM prescriptions GROUP BY org_id) pc ON pc.org_id = o.id
+       LEFT JOIN (SELECT org_id, COUNT(*) AS user_count FROM users GROUP BY org_id) uc ON uc.org_id = o.id
        ORDER BY o.created_at DESC LIMIT 5`,
     );
+
+    const orgIds = (recentOrgs as any[]).map((o: any) => o.id);
+    const prescCounts = await this.prescriptionModel.aggregate([
+      { $match: { org_id: { $in: orgIds } } },
+      { $group: { _id: '$org_id', count: { $sum: 1 } } },
+    ]);
+    const prescCountMap = new Map(prescCounts.map((p: any) => [p._id, p.count]));
+
     return {
       stats: {
         total_orgs: orgStats.total, active_orgs: orgStats.active || 0,
         suspended_orgs: orgStats.suspended || 0, total_users: userStats.total,
-        total_prescriptions: presStats.total, prescriptions_this_month: presMonth.count,
+        total_prescriptions: totalPrescriptions, prescriptions_this_month: prescriptionsThisMonth,
       },
-      recent_orgs: recentOrgs,
+      recent_orgs: (recentOrgs as any[]).map((o: any) => ({
+        ...o, prescription_count: prescCountMap.get(o.id) ?? 0,
+      })),
     };
   }
 
@@ -159,67 +172,94 @@ export class PlatformService {
     const { search, plan, status } = query;
     if (status && !VALID_STATUSES.includes(status.toUpperCase())) throw AppError.validation('Invalid status filter');
 
-    // Derived-table JOINs run each aggregate once across all orgs,
-    // replacing the previous approach of N × 5 correlated subqueries.
     let sql = `
       SELECT o.*,
-        COALESCE(uc.user_count, 0)                    AS user_count,
-        COALESCE(pc.prescription_count, 0)            AS prescription_count,
-        COALESCE(pm.prescriptions_this_month, 0)      AS prescriptions_this_month,
-        owner.name                                    AS owner_name,
-        owner.email                                   AS owner_email
+        COALESCE(p.name, 'FREE')   AS plan_name,
+        COALESCE(uc.user_count, 0) AS user_count,
+        owner.name                 AS owner_name,
+        owner.email                AS owner_email
       FROM organizations o
-      LEFT JOIN (SELECT org_id, COUNT(*) AS user_count FROM users GROUP BY org_id) uc
-        ON uc.org_id = o.id
-      LEFT JOIN (SELECT org_id, COUNT(*) AS prescription_count FROM prescriptions GROUP BY org_id) pc
-        ON pc.org_id = o.id
-      LEFT JOIN (
-        SELECT org_id, COUNT(*) AS prescriptions_this_month
-        FROM prescriptions
-        WHERE MONTH(created_at) = MONTH(NOW()) AND YEAR(created_at) = YEAR(NOW())
-        GROUP BY org_id
-      ) pm ON pm.org_id = o.id
+      LEFT JOIN plans p ON p.id = o.plan_id
+      LEFT JOIN (SELECT org_id, COUNT(*) AS user_count FROM users GROUP BY org_id) uc ON uc.org_id = o.id
       LEFT JOIN users owner ON owner.id = o.owner_id
       WHERE 1=1`;
     const params: any[] = [];
     if (search) { sql += ' AND o.name LIKE ?'; params.push(`%${search.trim()}%`); }
-    if (plan)   { sql += ' AND o.plan = ?';    params.push(plan.toUpperCase()); }
+    if (plan)   { sql += ' AND p.name = ?';    params.push(plan.toUpperCase()); }
     if (status) { sql += ' AND o.status = ?';  params.push(status.toUpperCase()); }
     sql += ' ORDER BY o.created_at DESC LIMIT 200';
 
     const [orgs]: any = await this.pool.execute(sql, params);
-    return orgs;
+
+    const orgIds = (orgs as any[]).map((o: any) => o.id);
+    if (orgIds.length === 0) return orgs;
+
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth   = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const [allCounts, monthCounts] = await Promise.all([
+      this.prescriptionModel.aggregate([
+        { $match: { org_id: { $in: orgIds } } },
+        { $group: { _id: '$org_id', count: { $sum: 1 } } },
+      ]),
+      this.prescriptionModel.aggregate([
+        { $match: { org_id: { $in: orgIds }, created_at: { $gte: startOfMonth, $lt: endOfMonth } } },
+        { $group: { _id: '$org_id', count: { $sum: 1 } } },
+      ]),
+    ]);
+    const allMap   = new Map(allCounts.map((p: any)   => [p._id, p.count]));
+    const monthMap = new Map(monthCounts.map((p: any) => [p._id, p.count]));
+
+    return (orgs as any[]).map((o: any) => ({
+      ...o,
+      prescription_count:        allMap.get(o.id)   ?? 0,
+      prescriptions_this_month:  monthMap.get(o.id) ?? 0,
+    }));
   }
 
   async getOrgDetail(id: string) {
     await this.assertOrgExists(id);
 
-    const [orgs]: any = await this.pool.execute(
-      `SELECT o.*,
-         (SELECT COUNT(*) FROM users u         WHERE u.org_id = o.id) AS user_count,
-         (SELECT COUNT(*) FROM prescriptions p WHERE p.org_id = o.id) AS prescription_count,
-         (SELECT COUNT(*) FROM prescriptions p WHERE p.org_id = o.id
-            AND MONTH(p.created_at) = MONTH(NOW()) AND YEAR(p.created_at) = YEAR(NOW())) AS prescriptions_this_month,
-         (SELECT u.name  FROM users u WHERE u.id = o.owner_id LIMIT 1) AS owner_name,
-         (SELECT u.email FROM users u WHERE u.id = o.owner_id LIMIT 1) AS owner_email
-       FROM organizations o WHERE o.id = ?`,
-      [id],
-    );
-    const [members]: any = await this.pool.execute(
-      `SELECT u.id, u.name, u.email, u.role, u.is_owner, u.is_org_admin, u.created_at,
-              r.display_name AS role_display_name, r.color AS role_color
-       FROM users u LEFT JOIN roles r ON u.custom_role_id = r.id
-       WHERE u.org_id = ? ORDER BY u.is_owner DESC, u.created_at ASC`,
-      [id],
-    );
-    const [roles]: any = await this.pool.execute(
-      'SELECT * FROM roles WHERE org_id = ? ORDER BY created_at ASC', [id],
-    );
-    const [recent_prescriptions]: any = await this.pool.execute(
-      `SELECT id, patient_name, doctor_name, status, created_at
-       FROM prescriptions WHERE org_id = ? ORDER BY created_at DESC LIMIT 10`, [id],
-    );
-    return { ...orgs[0], users: members, roles, recent_prescriptions };
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth   = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const [[orgs], [members], [roles], prescription_count, prescriptions_this_month, recent_prescriptions] =
+      await Promise.all([
+        this.pool.execute(
+          `SELECT o.*,
+             (SELECT COUNT(*) FROM users u WHERE u.org_id = o.id) AS user_count,
+             (SELECT u.name  FROM users u WHERE u.id = o.owner_id LIMIT 1) AS owner_name,
+             (SELECT u.email FROM users u WHERE u.id = o.owner_id LIMIT 1) AS owner_email
+           FROM organizations o WHERE o.id = ?`,
+          [id],
+        ),
+        this.pool.execute(
+          `SELECT u.id, u.name, u.email, u.role, u.is_owner, u.is_org_admin, u.created_at,
+                  r.display_name AS role_display_name, r.color AS role_color
+           FROM users u LEFT JOIN roles r ON u.custom_role_id = r.id
+           WHERE u.org_id = ? ORDER BY u.is_owner DESC, u.created_at ASC`,
+          [id],
+        ),
+        this.pool.execute('SELECT * FROM roles WHERE org_id = ? ORDER BY created_at ASC', [id]),
+        this.prescriptionModel.countDocuments({ org_id: id }),
+        this.prescriptionModel.countDocuments({ org_id: id, created_at: { $gte: startOfMonth, $lt: endOfMonth } }),
+        this.prescriptionModel
+          .find({ org_id: id }, { patient_name: 1, doctor_name: 1, status: 1, created_at: 1 })
+          .sort({ created_at: -1 })
+          .limit(10)
+          .lean(),
+      ]);
+
+    return {
+      ...(orgs as any[])[0],
+      prescription_count,
+      prescriptions_this_month,
+      users: members,
+      roles,
+      recent_prescriptions,
+    };
   }
 
   async createOrg(body: any) {
@@ -254,21 +294,24 @@ export class PlatformService {
       if (existingPh.length > 0) throw AppError.conflict('A user with this pharmacist email already exists');
     }
 
-    const { prescription_limit, team_limit } = PLAN_LIMITS[upperPlan];
     const orgId         = uuidv4();
     const adminId       = uuidv4();
     const pharmacistId  = hasPharmacist ? uuidv4() : null;
     const hashedAdmin   = await bcrypt.hash(admin_password, 10);
     const hashedPharm   = hasPharmacist ? await bcrypt.hash(pharmacist_password, 10) : null;
 
+    // Resolve plan_id — look up the plans table (null is fine if FREE plan not seeded yet)
+    const [planRows]: any = await this.pool.execute('SELECT id FROM plans WHERE name = ? LIMIT 1', [upperPlan]);
+    const planId: string | null = planRows.length > 0 ? planRows[0].id : null;
+
     const conn = await (this.pool as any).getConnection();
     try {
       await conn.beginTransaction();
 
       await conn.execute(
-        `INSERT INTO organizations (id, name, slug, plan, prescription_limit, team_limit, owner_id, address, phone, website)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [orgId, org_name.trim(), slugify(org_name), upperPlan, prescription_limit, team_limit,
+        `INSERT INTO organizations (id, name, slug, plan_id, owner_id, address, phone, website)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orgId, org_name.trim(), slugify(org_name), planId,
          adminId, address?.trim() || null, phone?.trim() || null, website?.trim() || null],
       );
 
@@ -334,9 +377,10 @@ export class PlatformService {
     if (plan !== undefined) {
       const upperPlan = plan.toUpperCase();
       if (!PLAN_LIMITS[upperPlan]) throw AppError.validation(`Invalid plan`);
-      const { prescription_limit, team_limit } = PLAN_LIMITS[upperPlan];
-      updates.push('plan = ?', 'prescription_limit = ?', 'team_limit = ?');
-      params.push(upperPlan, prescription_limit, team_limit);
+      const [planRows]: any = await this.pool.execute('SELECT id FROM plans WHERE name = ? LIMIT 1', [upperPlan]);
+      const newPlanId: string | null = planRows.length > 0 ? planRows[0].id : null;
+      updates.push('plan_id = ?');
+      params.push(newPlanId);
     }
 
     if (updates.length === 0) throw AppError.badRequest('No valid fields provided');
@@ -356,9 +400,10 @@ export class PlatformService {
     const { search, org_id } = query;
     let sql = `
       SELECT u.id, u.name, u.email, u.role, u.is_org_admin, u.created_at,
-             o.name AS org_name, o.plan AS org_plan, r.display_name AS role_display_name
+             o.name AS org_name, COALESCE(p.name, 'FREE') AS org_plan, r.display_name AS role_display_name
       FROM users u
       LEFT JOIN organizations o ON u.org_id = o.id
+      LEFT JOIN plans p ON p.id = o.plan_id
       LEFT JOIN roles r ON u.custom_role_id = r.id
       WHERE 1=1`;
     const params: any[] = [];

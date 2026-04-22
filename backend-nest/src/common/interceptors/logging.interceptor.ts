@@ -37,13 +37,17 @@ export class LoggingInterceptor implements NestInterceptor {
       orgId:   req.user?.orgId  as string | undefined,
     };
 
-    this.logger.http('Incoming request', {
-      requestId: req.requestId,
-      method,
-      path: originalUrl,
-      userId: req.user?.userId ?? null,
-      orgId:  req.user?.orgId  ?? null,
-    });
+    const isReadRequest = method === 'GET';
+
+    if (!isReadRequest) {
+      this.logger.http('Incoming request', {
+        requestId: req.requestId,
+        method,
+        path: originalUrl,
+        userId: req.user?.userId ?? null,
+        orgId:  req.user?.orgId  ?? null,
+      });
+    }
 
     // Wrap the entire handler in AsyncLocalStorage so every service/repo
     // log entry in this request automatically gets the traceId.
@@ -61,15 +65,18 @@ export class LoggingInterceptor implements NestInterceptor {
                 durationMs / 1000,
               );
 
-              this.logger.http('Request completed', {
-                requestId:  req.requestId,
-                method,
-                path:       originalUrl,
-                statusCode: res.statusCode,
-                durationMs,
-                userId:     req.user?.userId ?? null,
-                orgId:      req.user?.orgId  ?? null,
-              });
+              // Skip logging successful GET responses — they're high-frequency read polls
+              if (!isReadRequest || res.statusCode >= 400) {
+                this.logger.http('Request completed', {
+                  requestId:  req.requestId,
+                  method,
+                  path:       originalUrl,
+                  statusCode: res.statusCode,
+                  durationMs,
+                  userId:     req.user?.userId ?? null,
+                  orgId:      req.user?.orgId  ?? null,
+                });
+              }
             },
             error: (err) => {
               const durationMs = Date.now() - startMs;

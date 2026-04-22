@@ -1,12 +1,18 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { Pool } from 'mysql2/promise';
 import { MYSQL_POOL } from '../../database/database.module';
+import { Prescription, PrescriptionDocument } from '../prescription/schemas/prescription.schema';
 
 @Injectable()
 export class OrganizationRepository {
   private readonly logger = new Logger(OrganizationRepository.name);
 
-  constructor(@Inject(MYSQL_POOL) private readonly pool: Pool) {}
+  constructor(
+    @Inject(MYSQL_POOL) private readonly pool: Pool,
+    @InjectModel(Prescription.name) private readonly prescriptionModel: Model<PrescriptionDocument>,
+  ) {}
 
   async getConnection() { return this.pool.getConnection(); }
 
@@ -42,12 +48,10 @@ export class OrganizationRepository {
   }
 
   async countPrescriptionsThisMonth(orgId: string): Promise<number> {
-    const [[{ count }]]: any = await this.pool.execute(
-      `SELECT COUNT(*) AS count FROM prescriptions
-       WHERE org_id = ? AND MONTH(created_at) = MONTH(NOW()) AND YEAR(created_at) = YEAR(NOW())`,
-      [orgId],
-    );
-    return count as number;
+    const now   = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end   = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return this.prescriptionModel.countDocuments({ org_id: orgId, created_at: { $gte: start, $lt: end } });
   }
 
   async countTeamMembers(orgId: string): Promise<number> {

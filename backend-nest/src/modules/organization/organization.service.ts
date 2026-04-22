@@ -60,14 +60,10 @@ export class OrganizationService {
     const [orgRows]: any = await this.pool.execute('SELECT * FROM organizations WHERE id = ?', [orgId]);
     const org = (orgRows as any[])[0];
 
-    const [[{ count: usage_this_month }]]: any = await this.pool.execute(
-      `SELECT COUNT(*) AS count FROM prescriptions
-       WHERE org_id = ? AND MONTH(created_at) = MONTH(NOW()) AND YEAR(created_at) = YEAR(NOW())`,
-      [orgId],
-    );
-    const [[{ count: team_count }]]: any = await this.pool.execute(
-      'SELECT COUNT(*) AS count FROM users WHERE org_id = ?', [orgId],
-    );
+    const [usage_this_month, team_count] = await Promise.all([
+      this.orgRepository.countPrescriptionsThisMonth(orgId),
+      this.orgRepository.countTeamMembers(orgId),
+    ]);
     return { ...org, usage_this_month, team_count };
   }
 

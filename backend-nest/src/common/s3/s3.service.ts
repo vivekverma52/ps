@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -89,5 +89,11 @@ export class S3Service {
       Key: key,
     });
     return getSignedUrl(this.s3, command, { expiresIn });
+  }
+
+  /** Delete a single object by key — used for S3 rollback when a downstream DB write fails. */
+  async deleteObject(key: string): Promise<void> {
+    await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+    this.logger.log(`[S3] Deleted: key=${key}`);
   }
 }

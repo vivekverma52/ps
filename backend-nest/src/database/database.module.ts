@@ -38,19 +38,35 @@ export const MYSQL_POOL = 'MYSQL_POOL';
           connectTimeout:     10_000,
         });
 
-        // Verify connectivity immediately — fail fast if DB is unreachable
-        try {
-          const conn = await pool.getConnection();
-          await conn.execute('SELECT 1');
-          conn.release();
-          logger.log('MySQL connection verified');
-        } catch (err: any) {
-          const code   = err?.code    ?? 'UNKNOWN';
-          const detail = err?.message ?? String(err);
+        // Verify connectivity — retry up to 3 times (handles slow Docker/RDS startup)
+        const MAX_ATTEMPTS = 3;
+        let lastErr: Error | undefined;
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          try {
+            const conn = await pool.getConnection();
+            await conn.execute('SELECT 1');
+            conn.release();
+            logger.log(`MySQL connection verified (attempt ${attempt})`);
+            lastErr = undefined;
+            break;
+          } catch (err: unknown) {
+            lastErr = err as Error;
+            const code   = (err as { code?: string })?.code    ?? 'UNKNOWN';
+            const detail = (err as Error)?.message ?? String(err);
+            logger.warn(`MySQL attempt ${attempt}/${MAX_ATTEMPTS} failed [${code}]: ${detail}`);
+            if (attempt < MAX_ATTEMPTS) {
+              await new Promise(r => setTimeout(r, 2000 * attempt));
+            }
+          }
+        }
+
+        if (lastErr) {
+          const code   = (lastErr as { code?: string })?.code    ?? 'UNKNOWN';
+          const detail = lastErr.message;
           logger.error(
-            `MySQL connection failed [${code}]: ${detail}. ` +
-            `Check DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME in .env`,
-            err?.stack,
+            `MySQL unreachable after ${MAX_ATTEMPTS} attempts [${code}]: ${detail}.\n` +
+            `  → Local dev: ensure MySQL is running on ${host}:${port}\n` +
+            `  → RDS: whitelist your IP in the security group (port 3306)`,
           );
           throw new Error(`Cannot connect to MySQL (${code}): ${detail}`);
         }

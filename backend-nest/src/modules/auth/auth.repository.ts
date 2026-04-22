@@ -33,7 +33,6 @@ export class AuthRepository {
   }
 
   async findUserById(userId: string) {
-    this.logger.debug(`[findUserById] userId=${userId}`);
     const [rows]: any = await this.pool.execute(
       `SELECT u.id, u.name, u.email, u.role, u.org_id, u.hospital_id,
               u.first_name, u.last_name, u.phone, u.status,
@@ -66,7 +65,7 @@ export class AuthRepository {
     orgId: string | null; isOwner: boolean; isOrgAdmin: boolean; customRoleId: string | null;
   }) {
     await conn.execute(
-      `INSERT INTO users
+      `INSERT INTO users          
          (id, name, email, password_hash, first_name, last_name, role,
           org_id, is_owner, is_org_admin, custom_role_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

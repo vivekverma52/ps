@@ -34,6 +34,7 @@ export default function PharmacistDashboard() {
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(20)
   const prevIdsRef = useRef<Set<string>>(new Set())
+  const prevSigRef = useRef<string>('')
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [debouncedSearch, setDebouncedSearch] = useState('')
 
@@ -58,12 +59,20 @@ export default function PharmacistDashboard() {
       const data: Prescription[] = payload.data ?? []
       const newTotal: number = payload.total ?? 0
 
-      if (silent && prevIdsRef.current.size > 0) {
-        const incoming = data.filter(p => !prevIdsRef.current.has(p.id))
-        if (incoming.length > 0) {
-          toast.success(`${incoming.length} new prescription${incoming.length > 1 ? 's' : ''} received`, { icon: '💊', duration: 4000 })
+      const sig = `${newTotal}|${data.map(p => `${p.id}:${p.status}:${p.medicine_count}`).join(',')}`
+
+      if (silent) {
+        if (sig === prevSigRef.current) return // nothing changed, skip re-render
+
+        if (prevIdsRef.current.size > 0) {
+          const incoming = data.filter(p => !prevIdsRef.current.has(p.id))
+          if (incoming.length > 0) {
+            toast.success(`${incoming.length} new prescription${incoming.length > 1 ? 's' : ''} received`, { icon: '💊', duration: 4000 })
+          }
         }
       }
+
+      prevSigRef.current = sig
       prevIdsRef.current = new Set(data.map(p => p.id))
       setPrescriptions(data)
       setTotal(newTotal)
@@ -220,7 +229,7 @@ export default function PharmacistDashboard() {
 
       {!loading && (
         <p style={{ fontSize: 11, color: 'var(--ink-light)', marginTop: 10, textAlign: 'right' }}>
-          {total} prescription{total !== 1 ? 's' : ''} · auto-refreshes every 5s
+          {total} prescription{total !== 1 ? 's' : ''} · refreshes only on new data
         </p>
       )}
 

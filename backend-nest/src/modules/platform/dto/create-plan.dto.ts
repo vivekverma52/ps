@@ -1,27 +1,24 @@
-import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, Min } from 'class-validator';
 
 export class CreatePlanDto {
   @IsEnum(['FREE', 'PRO', 'GROWTH', 'ENT'])
   name: 'FREE' | 'PRO' | 'GROWTH' | 'ENT';
 
-  @IsString()
-  display_name: string;
+  @IsNumber()
+  @Min(1)
+  max_prescriptions_per_month: number;
 
   @IsNumber()
   @Min(1)
-  rx_limit: number;
+  max_staff_per_hospital: number;
 
   @IsNumber()
   @Min(1)
-  team_limit: number;
-
-  @IsNumber()
-  @Min(1)
-  hospital_limit: number;
+  max_hospitals: number;
 
   @IsOptional()
   @IsNumber()
-  price_monthly?: number;
+  price?: number;
 
   @IsOptional()
   features?: Record<string, any>;
