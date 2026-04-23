@@ -7,7 +7,18 @@ import { useAuth } from '../context/AuthContext'
 import AppShell from '../components/layout/AppShell'
 import { DOCTOR_NAV } from '../constants/nav'
 
-const LANGUAGES = ['Hindi','English','Marathi','Tamil','Telugu','Bengali','Gujarati','Kannada','Punjabi','Odia']
+const LANGUAGES = [
+  { label: 'Hindi',    value: 'hi' },
+  { label: 'English',  value: 'en' },
+  { label: 'Marathi',  value: 'mr' },
+  { label: 'Tamil',    value: 'ta' },
+  { label: 'Telugu',   value: 'te' },
+  { label: 'Bengali',  value: 'bn' },
+  { label: 'Gujarati', value: 'gu' },
+  { label: 'Kannada',  value: 'kn' },
+  { label: 'Punjabi',  value: 'pa' },
+  { label: 'Odia',     value: 'or' },
+]
 
 export default function NewPrescriptionPage() {
   const { user } = useAuth()
@@ -20,7 +31,7 @@ export default function NewPrescriptionPage() {
     patient_phone: string
     language: string
     notes: string
-  }>({ defaultValues: { doctor_name: user?.name || '', language: 'Hindi' } })
+  }>({ defaultValues: { doctor_name: user?.name || '', language: 'hi' } })
 
   useEffect(() => {
     return () => { if (preview) URL.revokeObjectURL(preview) }
@@ -154,7 +165,7 @@ export default function NewPrescriptionPage() {
             <div style={{ marginBottom: 12 }}>
               <label style={lbl}>Language</label>
               <select className="input-field" {...register('language')}>
-                {LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
+                {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
               </select>
             </div>
 

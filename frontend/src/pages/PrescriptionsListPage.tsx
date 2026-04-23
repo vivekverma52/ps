@@ -7,6 +7,7 @@ import AppShell from '../components/layout/AppShell'
 import { DOCTOR_NAV } from '../constants/nav'
 import { StatusBadge } from '../components/ui/StatusBadge'
 import StatCard from '../components/ui/StatCard'
+import { langLabel } from '../utils/language'
 
 interface Prescription {
   id: string
@@ -160,7 +161,7 @@ export default function PrescriptionsListPage() {
                   </div>
                 </td>
                 <td style={{ fontVariantNumeric: 'tabular-nums' }}>{p.patient_phone || '—'}</td>
-                <td>{p.language}</td>
+                <td>{langLabel(p.language)}</td>
                 <td>
                   <span style={{ fontSize: 12, fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: Number(p.medicine_count) > 0 ? 'var(--teal-light)' : 'var(--cell)', color: Number(p.medicine_count) > 0 ? 'var(--teal-dark)' : 'var(--ink-light)' }}>
                     {p.medicine_count}

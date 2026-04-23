@@ -27,7 +27,6 @@ class MedicineEntryDto {
   @IsOptional() @AllowNull() duration?: any;
   @IsOptional() @AllowNull() time_of_day?: any;
   @IsOptional() @AllowNull() with_food?: any;
-  @IsOptional() @AllowNull() text?: any;
 }
 
 class InterpretedDataInnerDto {

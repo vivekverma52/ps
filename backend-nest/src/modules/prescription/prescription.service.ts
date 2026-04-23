@@ -2,6 +2,18 @@
  * PrescriptionService — Level 3 (Medical)
  * Prescriptions stored in MongoDB · Medicine Library in MongoDB · Org limits in MySQL
  */
+
+const LANG_NAME_TO_CODE: Record<string, string> = {
+  hindi: 'hi', english: 'en', marathi: 'mr', tamil: 'ta',
+  telugu: 'te', bengali: 'bn', gujarati: 'gu', kannada: 'kn',
+  punjabi: 'pa', odia: 'or', bhojpuri: 'bho',
+};
+
+function normaliseLang(lang: string): string {
+  const key = lang.trim().toLowerCase();
+  return LANG_NAME_TO_CODE[key] ?? lang;
+}
+
 import { Injectable, Inject, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model } from 'mongoose';
@@ -82,12 +94,11 @@ function extractS3Key(url: string): string {
 function manualMedicineToOcr(m: ManualMedicine): OcrMedicine {
   return {
     medicine_name: m.name,
-    dosage:        m.quantity ? `${m.quantity} tablet(s)` : null,
-    instructions:  [m.frequency, m.description].filter(Boolean).join(' — ') || null,
-    duration:      m.course ?? null,
-    time_of_day:   m.frequency ? m.frequency.split(', ') : null,
-    with_food:     null,
-    text:          { en: m.name },
+    dosage:        m.quantity || null,
+    instructions:  m.description || null,
+    duration:      m.course || null,
+    time_of_day:   m.frequency || null,
+    with_food:     m.with_food || null,
   };
 }
 
@@ -430,7 +441,7 @@ export class PrescriptionService implements OnModuleInit {
 
   async listPrescriptions(params: {
     role: string; userId: string; orgId: string | null; hospitalId?: string | null;
-    page?: string; limit?: string; search?: string; status?: string;
+    page?: string; limit?: string; search?: string; status?: string; date?: string;
   }): Promise<{ data: WithUrls<Prescription>[]; total: number; page: number; limit: number }> {
     const { role, userId, orgId, hospitalId } = params;
     const { pageNum, limitNum } = parsePagination(params.page, params.limit);
@@ -450,6 +461,20 @@ export class PrescriptionService implements OnModuleInit {
     }
     if (params.status?.trim()) {
       filter.status = params.status.trim().toUpperCase() as PrescriptionStatus;
+    }
+
+    // Date filter — IST (UTC+05:30)
+    if (params.date === 'today' || params.date === 'week') {
+      const IST_MS = 5.5 * 60 * 60 * 1000;
+      const nowIst = new Date(Date.now() + IST_MS);
+      const y = nowIst.getUTCFullYear(), m = nowIst.getUTCMonth(), d = nowIst.getUTCDate();
+      const startIst = new Date(Date.UTC(y, m, d));         // midnight IST as UTC Date
+      const startUtc = new Date(startIst.getTime() - IST_MS);
+      if (params.date === 'today') {
+        filter.created_at = { $gte: startUtc, $lt: new Date(startUtc.getTime() + 86_400_000) };
+      } else {
+        filter.created_at = { $gte: new Date(startUtc.getTime() - 6 * 86_400_000) };
+      }
     }
 
     const skip = (pageNum - 1) * limitNum;
@@ -539,37 +564,29 @@ export class PrescriptionService implements OnModuleInit {
 
     if (renderQueueUrl) {
       const payload: RenderPayload = {
-        status:     'success',
         request_id: prescription.id,
-        language:   prescription.language ?? 'en',
+        language:   normaliseLang(prescription.language ?? 'en'),
         interpreted_data: {
           patient_details: {
-            name:    prescription.patient_name,
-            contact: prescription.patient_phone,
-            date:    new Date(prescription.created_at).toISOString().slice(0, 10),
-            age:     ocr.patient_details?.age    ?? null,
-            gender:  ocr.patient_details?.gender ?? null,
+            name: prescription.patient_name,
+            age:  ocr.patient_details?.age ?? null,
           },
           doctor_details: {
             name:           prescription.doctor_name,
             specialization: ocr.doctor_details?.qualifications ?? null,
-            clinic:         (ocr.hospital_details?.name ?? ocr.doctor_details?.clinic) ?? null,
-            registration:   ocr.doctor_details?.contact ?? null,
           },
           medicines: allMedicines.map((m): RenderMedicine => ({
             medicine_name: m.medicine_name,
-            dosage:        m.dosage       ?? null,
-            instructions:  m.instructions ?? null,
-            duration:      m.duration     ?? null,
-            time_of_day:   m.time_of_day  ?? null,
-            with_food:     m.with_food    ?? null,
-            text:          m.text         ?? { en: m.medicine_name },
+            dosage:        m.dosage        ?? null,
+            instructions:  m.instructions  ?? null,
+            duration:      m.duration      ?? null,
+            time_of_day:   m.time_of_day ?? null,
+            with_food:     m.with_food   ?? null,
           })),
-          summary:           ocr.summary           ?? null,
-          follow_up:         ocr.follow_up         ?? null,
-          emergency_contact: ocr.emergency_contact ?? null,
         },
       };
+
+      this.logger.log(`[RENDER] SQS payload:\n${JSON.stringify(payload, null, 2)}`);
 
       try {
         await this.withRetry(
@@ -694,7 +711,7 @@ export class PrescriptionService implements OnModuleInit {
   async addMedicineToRx(
     prescriptionId: string,
     actor: ActorContext,
-    body: { name: string; quantity?: string; frequency: string; course: string; description?: string },
+    body: { name: string; quantity?: string; frequency: string; course: string; description?: string; with_food?: string },
   ): Promise<ManualMedicine> {
     this.logger.log(`[MEDICINE:ADD] prescriptionId=${prescriptionId} name="${body.name}"`);
 
@@ -708,6 +725,7 @@ export class PrescriptionService implements OnModuleInit {
       frequency:   body.frequency.trim(),
       course:      body.course.trim(),
       description: body.description?.trim() || null,
+      with_food:   body.with_food?.trim() || null,
     };
 
     // Atomic pipeline: initialise interpreted_data if null, then append — no lost-update race
@@ -740,7 +758,7 @@ export class PrescriptionService implements OnModuleInit {
     prescriptionId: string,
     medicineId: string,
     actor: ActorContext,
-    body: { name?: string; quantity?: string; frequency?: string; course?: string; description?: string },
+    body: { name?: string; quantity?: string; frequency?: string; course?: string; description?: string; with_food?: string },
   ): Promise<ManualMedicine> {
     this.logger.log(`[MEDICINE:UPDATE] prescriptionId=${prescriptionId} medicineId=${medicineId}`);
     if (Object.keys(body).length === 0) throw AppError.badRequest('No fields provided to update');
@@ -765,6 +783,7 @@ export class PrescriptionService implements OnModuleInit {
       ...(body.frequency   !== undefined && { frequency:   body.frequency.trim() }),
       ...(body.course      !== undefined && { course:      body.course.trim() }),
       ...(body.description !== undefined && { description: body.description.trim() }),
+      ...(body.with_food   !== undefined && { with_food:   body.with_food.trim() || null }),
     };
 
     // Atomic positional update — only touches the matched array element
@@ -812,13 +831,13 @@ export class PrescriptionService implements OnModuleInit {
 
   async searchMedicines(query: string): Promise<string[]> {
     const q = (query || '').trim();
-    const filter: FilterQuery<MedicinePrescriptionDocument> = q.length > 0
-      ? { medicine_name: { $regex: escapeRegex(q), $options: 'i' } }
-      : {};
+    if (q.length < 2) return [];
 
-    this.logger.log(`[MEDICINE:SEARCH] query="${q}"`);
     const docs = await this.medicineLibraryModel
-      .find(filter, { medicine_name: 1, _id: 0 })
+      .find(
+        { medicine_name: { $regex: escapeRegex(q), $options: 'i' } },
+        { medicine_name: 1, _id: 0 },
+      )
       .sort({ medicine_name: 1 })
       .limit(20)
       .lean<Pick<MedicinePrescription, 'medicine_name'>[]>();

@@ -16,6 +16,12 @@ function write(stream: NodeJS.WriteStream, entry: Record<string, any>) {
   stream.write(JSON.stringify(entry) + '\n');
 }
 
+// Returns ISO-8601 timestamp in IST (UTC+05:30)
+function istTimestamp(): string {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  return new Date(Date.now() + IST_OFFSET_MS).toISOString().replace('Z', '+05:30');
+}
+
 @Injectable({ scope: Scope.DEFAULT })
 export class AppLogger implements LoggerService {
   private context?: string;
@@ -61,7 +67,7 @@ export class AppLogger implements LoggerService {
     const reqCtx = requestContextStorage.getStore();
 
     const entry: Record<string, any> = {
-      timestamp: new Date().toISOString(),
+      timestamp: istTimestamp(),
       level,
       context: this.context ?? 'App',
       message,

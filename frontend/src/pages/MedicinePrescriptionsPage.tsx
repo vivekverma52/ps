@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useReducer } from 'react'
+import { useState, useEffect, useRef, useReducer, useCallback } from 'react'
 import toast from 'react-hot-toast'
 import api from '../services/api'
 import { useAuth } from '../context/AuthContext'
@@ -32,7 +32,6 @@ const EMPTY_FORM = {
 }
 
 type FormState = typeof EMPTY_FORM
-
 type ImageSlot = 1 | 2 | 3
 
 type ModalState = {
@@ -96,48 +95,82 @@ function modalReducer(state: ModalState, action: ModalAction): ModalState {
   }
 }
 
+// ── Skeleton shimmer row ──────────────────────────────────────────────────────
+function SkeletonRows({ n = 8 }: { n?: number }) {
+  return (
+    <>
+      {Array.from({ length: n }).map((_, i) => (
+        <tr key={i}>
+          {[200, 130, 100, 60, 160, 130, 80].map((w, j) => (
+            <td key={j} style={{ padding: '14px 16px' }}>
+              <div className="sk" style={{ height: 13, width: w, borderRadius: 6 }} />
+              {j === 0 && <div className="sk" style={{ height: 10, width: w * 0.6, borderRadius: 6, marginTop: 6 }} />}
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  )
+}
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50]
+
 export default function MedicinePrescriptionsPage() {
   const { user } = useAuth()
   const navItems = user?.role === 'PHARMACIST' ? PHARMACIST_NAV : DOCTOR_NAV
+
   const [medicines, setMedicines] = useState<Medicine[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [page, setPage] = useState(1)
   const [limit, setLimit] = useState(20)
-  const PAGE_SIZE_OPTIONS = [10, 20, 50]
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const [stats, setStats] = useState<{ total: number } | null>(null)
+  const [statsVisible, setStatsVisible] = useState(false)
 
   const [modal, dispatch] = useReducer(modalReducer, MODAL_CLOSED)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef  = useRef<HTMLInputElement>(null)
   const fileInputRef2 = useRef<HTMLInputElement>(null)
   const fileInputRef3 = useRef<HTMLInputElement>(null)
-  const [uploadingId, setUploadingId] = useState<string | null>(null)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [uploadingId, setUploadingId]   = useState<string | null>(null)
   const [viewingImage, setViewingImage] = useState<{ url: string; name: string } | null>(null)
   const [hoveredImage, setHoveredImage] = useState<{ url: string; x: number; y: number } | null>(null)
 
   useEffect(() => {
     return () => {
-      if (modal.imagePreview?.startsWith('blob:')) URL.revokeObjectURL(modal.imagePreview)
+      if (modal.imagePreview?.startsWith('blob:'))  URL.revokeObjectURL(modal.imagePreview)
       if (modal.imagePreview2?.startsWith('blob:')) URL.revokeObjectURL(modal.imagePreview2)
       if (modal.imagePreview3?.startsWith('blob:')) URL.revokeObjectURL(modal.imagePreview3)
     }
   }, [modal.imagePreview, modal.imagePreview2, modal.imagePreview3])
 
   function closeModal() {
-    if (modal.imagePreview?.startsWith('blob:')) URL.revokeObjectURL(modal.imagePreview)
+    if (modal.imagePreview?.startsWith('blob:'))  URL.revokeObjectURL(modal.imagePreview)
     if (modal.imagePreview2?.startsWith('blob:')) URL.revokeObjectURL(modal.imagePreview2)
     if (modal.imagePreview3?.startsWith('blob:')) URL.revokeObjectURL(modal.imagePreview3)
     dispatch({ type: 'CLOSE' })
   }
 
-  async function fetchMedicines() {
+  // ── Data fetching ───────────────────────────────────────────────────────────
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const { data } = await api.get('/medicine-prescriptions', { params: { page: 1, limit: 1 } })
+      setStats({ total: data.data.total })
+      setStatsVisible(true)
+    } catch {}
+  }, [])
+
+  const fetchMedicines = useCallback(async () => {
     setLoading(true)
     try {
       const params: Record<string, string | number> = { page, limit }
-      if (search) params.search = search
-      if (categoryFilter) params.drug_category = categoryFilter
+      if (debouncedSearch) params.search = debouncedSearch
+      if (categoryFilter)  params.drug_category = categoryFilter
       const { data } = await api.get('/medicine-prescriptions', { params })
       setMedicines(data.data.data)
       setTotal(data.data.total)
@@ -146,9 +179,24 @@ export default function MedicinePrescriptionsPage() {
     } finally {
       setLoading(false)
     }
+  }, [page, limit, debouncedSearch, categoryFilter])
+
+  useEffect(() => { fetchMedicines() }, [fetchMedicines])
+
+  useEffect(() => { fetchStats() }, [fetchStats])
+
+  // ── Search debounce ─────────────────────────────────────────────────────────
+
+  const handleSearch = (value: string) => {
+    setSearch(value)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(value)
+      setPage(1)
+    }, 500)
   }
 
-  useEffect(() => { fetchMedicines() }, [page, limit, search, categoryFilter])
+  // ── Save / delete ───────────────────────────────────────────────────────────
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -179,21 +227,11 @@ export default function MedicinePrescriptionsPage() {
       }
       closeModal()
       fetchMedicines()
+      fetchStats()
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Save failed')
     } finally {
       dispatch({ type: 'SET_SAVING', value: false })
-    }
-  }
-
-  async function handleDelete(id: string) {
-    try {
-      await api.delete(`/medicine-prescriptions/${id}`)
-      toast.success('Medicine deleted')
-      setDeletingId(null)
-      fetchMedicines()
-    } catch {
-      toast.error('Delete failed')
     }
   }
 
@@ -212,174 +250,401 @@ export default function MedicinePrescriptionsPage() {
     }
   }
 
+  // ── Pagination ──────────────────────────────────────────────────────────────
+
   const totalPages = Math.ceil(total / limit)
 
-  const AddBtn = (
-    <button className="btn btn-teal btn-sm" onClick={() => dispatch({ type: 'OPEN_CREATE' })}>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-      </svg>
-      Add Medicine
-    </button>
-  )
+  function pageNumbers(): (number | '…')[] {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1)
+    const pages: (number | '…')[] = []
+    if (page <= 4) {
+      pages.push(1, 2, 3, 4, 5, '…', totalPages)
+    } else if (page >= totalPages - 3) {
+      pages.push(1, '…', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages)
+    } else {
+      pages.push(1, '…', page - 1, page, page + 1, '…', totalPages)
+    }
+    return pages
+  }
+
+  // ── Styles shared ───────────────────────────────────────────────────────────
 
   const lbl: React.CSSProperties = { display: 'block', fontSize: 11, fontWeight: 500, color: 'var(--ink-light)', marginBottom: 5 }
 
-  return (
-    <AppShell navItems={navItems} sectionLabel={user?.role === 'PHARMACIST' ? 'Pharmacist' : undefined} topBarRight={AddBtn}>
+  const isFiltered = debouncedSearch || categoryFilter
 
-      {/* Filters */}
-      <div className="filter-bar">
+  return (
+    <AppShell navItems={navItems} sectionLabel={user?.role === 'PHARMACIST' ? 'Pharmacist' : undefined}>
+
+      {/* ── Page header ──────────────────────────────────────────────────── */}
+      {/* <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24, gap: 16 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)', margin: 0, letterSpacing: '-0.3px' }}>
+            Medicine Database
+          </h1>
+          <p style={{ fontSize: 13, color: 'var(--ink-light)', marginTop: 4 }}>
+            {statsVisible && stats
+              ? `${stats.total.toLocaleString()} medicine${stats.total !== 1 ? 's' : ''} in database`
+              : 'Loading…'}
+          </p>
+        </div>
+        <button
+          className="btn btn-teal"
+          onClick={() => dispatch({ type: 'OPEN_CREATE' })}
+          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Add Medicine
+        </button>
+      </div> */}
+
+      {/* ── Stat cards ───────────────────────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 14 }}>
+        {/* Total in DB */}
+        <div style={{
+          background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
+          padding: '10px 14px', borderLeft: '3px solid #7c3aed',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+        }}>
+          <div>
+            <p style={{ fontSize: 10, fontWeight: 600, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Total in Database</p>
+            <p style={{ fontSize: 11, color: 'var(--ink-light)', margin: '2px 0 0' }}>All time</p>
+          </div>
+          <p style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)', margin: 0, lineHeight: 1 }}>
+            {statsVisible && stats
+              ? stats.total.toLocaleString()
+              : <span className="sk" style={{ display: 'inline-block', width: 40, height: 22, borderRadius: 5, verticalAlign: 'middle' }} />}
+          </p>
+        </div>
+
+        {/* Filtered / Showing */}
+        <div style={{
+          background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
+          padding: '10px 14px', borderLeft: '3px solid var(--teal)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+        }}>
+          <div>
+            <p style={{ fontSize: 10, fontWeight: 600, color: 'var(--teal)', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>
+              {isFiltered ? 'Search Results' : 'Showing'}
+            </p>
+            <p style={{ fontSize: 11, color: 'var(--ink-light)', margin: '2px 0 0' }}>
+              {isFiltered ? 'matching filters' : 'medicines'}
+            </p>
+          </div>
+          <p style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)', margin: 0, lineHeight: 1 }}>
+            {loading
+              ? <span className="sk" style={{ display: 'inline-block', width: 40, height: 22, borderRadius: 5, verticalAlign: 'middle' }} />
+              : total.toLocaleString()}
+          </p>
+        </div>
+
+        {/* Page info */}
+        {/* <div style={{
+          background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
+          padding: '10px 14px', borderLeft: '3px solid #f59e0b',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+        }}>
+          <div>
+            <p style={{ fontSize: 10, fontWeight: 600, color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Current Page</p>
+            <p style={{ fontSize: 11, color: 'var(--ink-light)', margin: '2px 0 0' }}>
+              {totalPages > 1 ? `of ${totalPages} pages` : 'entries'}
+            </p>
+          </div>
+          <p style={{ fontSize: 22, fontWeight: 700, color: 'var(--ink)', margin: 0, lineHeight: 1 }}>
+            {loading
+              ? <span className="sk" style={{ display: 'inline-block', width: 40, height: 22, borderRadius: 5, verticalAlign: 'middle' }} />
+              : medicines.length}
+          </p>
+        </div> */}
+
+        <button
+          className="btn btn-teal"
+          onClick={() => dispatch({ type: 'OPEN_CREATE' })}
+          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Add Medicine
+        </button>
+
+      </div>
+
+      {/* ── Filter toolbar ────────────────────────────────────────────────── */}
+      <div className="filter-bar" style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, padding: '10px 14px', marginBottom: 16 }}>
+        {/* Debounced search */}
         <div className="filter-search">
           <svg className="filter-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
           </svg>
-          <input className="input-field"
-            placeholder="Search by medicine or generic name…"
-            value={search} onChange={e => { setSearch(e.target.value); setPage(1) }} />
+          <input
+            className="input-field"
+            placeholder="Search medicine or generic name…"
+            value={search}
+            onChange={e => handleSearch(e.target.value)}
+            style={{ paddingRight: search ? 28 : undefined }}
+          />
+          {search && (
+            <button
+              onClick={() => { handleSearch(''); setDebouncedSearch('') }}
+              style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--ink-light)', display: 'flex', alignItems: 'center', padding: 2 }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          )}
         </div>
-        <input className="input-field filter-select"
-          placeholder="Filter by drug category…"
-          value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setPage(1) }} />
-        <select className="input-field filter-select-sm" value={limit} onChange={e => { setLimit(Number(e.target.value)); setPage(1) }}>
-          {PAGE_SIZE_OPTIONS.map(n => (
-            <option key={n} value={n}>{n} / page</option>
-          ))}
+
+        {/* Category filter */}
+        <div style={{ position: 'relative', width: 160, flexShrink: 0 }}>
+          <svg style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-light)', pointerEvents: 'none' }}
+            width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+          </svg>
+          <input
+            className="input-field"
+            placeholder="Drug category…"
+            value={categoryFilter}
+            onChange={e => { setCategoryFilter(e.target.value); setPage(1) }}
+            style={{ paddingLeft: 28, paddingRight: categoryFilter ? 28 : undefined }}
+          />
+          {categoryFilter && (
+            <button
+              onClick={() => { setCategoryFilter(''); setPage(1) }}
+              style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--ink-light)', display: 'flex', alignItems: 'center', padding: 2 }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {/* Page size */}
+        <select
+          className="input-field filter-select-sm"
+          value={limit}
+          onChange={e => { setLimit(Number(e.target.value)); setPage(1) }}
+        >
+          {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n} / page</option>)}
         </select>
       </div>
 
-      {/* Table */}
-      {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0' }}>
-          <div style={{ width: 26, height: 26, border: '2px solid var(--teal)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin .7s linear infinite' }} />
-        </div>
-      ) : medicines.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--ink-light)', fontSize: 13 }}>
-          <p>No medicines found</p>
-          <p style={{ fontSize: 12, marginTop: 4, opacity: .7 }}>Add your first medicine using the button above</p>
-        </div>
-      ) : (
-        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14 }}>
-          <div className="table-scroll">
-          <table className="data-table">
+      {/* ── Table ─────────────────────────────────────────────────────────── */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
+        <div className="table-scroll">
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
-              <tr>
-                <th>Medicine</th>
-                <th>Generic Name</th>
-                <th>Category</th>
-                <th>Color</th>
-                <th>Common Usage</th>
-                <th>Image</th>
-                <th>Actions</th>
+              <tr style={{ borderBottom: '1px solid var(--border)', background: 'rgba(0,0,0,0.015)' }}>
+                {['Medicine', 'Generic Name', 'Category', 'Color', 'Common Usage', 'Images', ''].map(h => (
+                  <th key={h} style={{
+                    padding: '11px 16px', textAlign: 'left', fontSize: 11,
+                    fontWeight: 600, color: 'var(--ink-light)', letterSpacing: '0.04em',
+                    textTransform: 'uppercase', whiteSpace: 'nowrap',
+                  }}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {medicines.map(m => (
-                <tr key={m._id}>
-                  <td>
-                    <p style={{ fontWeight: 500, color: 'var(--ink)', fontSize: 13 }}>{m.medicine_name}</p>
-                    {m.salt_composition && (
-                      <p style={{ fontSize: 11, color: 'var(--ink-light)', marginTop: 2 }}>{m.salt_composition}</p>
-                    )}
-                  </td>
-                  <td style={{ fontSize: 13, color: 'var(--ink-light)' }}>{m.generic_name}</td>
-                  <td>
-                    <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, background: 'var(--teal-light)', color: 'var(--teal-dark)' }}>
-                      {m.drug_category}
-                    </span>
-                  </td>
-                  <td>
-                    {m.color ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{
-                          display: 'inline-block', width: 16, height: 16, borderRadius: '50%',
-                          background: m.color, border: '1.5px solid rgba(0,0,0,0.12)', flexShrink: 0,
-                        }} />
-                        <span style={{ fontSize: 12, color: 'var(--ink-light)' }}>{m.color}</span>
-                      </div>
-                    ) : (
-                      <span style={{ fontSize: 12, color: 'var(--ink-light)', opacity: 0.4 }}>—</span>
-                    )}
-                  </td>
-                  <td style={{ fontSize: 12, color: 'var(--ink-light)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {m.common_usage}
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      {(['medicine_image', 'medicine_image_2', 'medicine_image_3'] as const).map((field, i) => {
-                        const url = m[field]
-                        const slotKey = `${m._id}_${field}`
-                        return url ? (
-                          <div
-                            key={field}
-                            onClick={() => setViewingImage({ url, name: m.medicine_name })}
-                            onMouseEnter={e => {
-                              const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
-                              setHoveredImage({ url, x: rect.left + rect.width / 2, y: rect.top })
-                            }}
-                            onMouseLeave={() => setHoveredImage(null)}
-                            style={{
-                              width: 52, height: 52, borderRadius: 8, overflow: 'hidden',
-                              border: '1.5px solid var(--border)', cursor: 'zoom-in',
-                              background: '#f5f5f3', flexShrink: 0,
-                              boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
-                            }}
-                          >
-                            <img src={url} alt={`${m.medicine_name} ${i + 1}`}
-                              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-                          </div>
-                        ) : (
-                          <label key={field} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            width: 52, height: 52, borderRadius: 8, border: '1.5px dashed var(--border)', fontSize: 11,
-                            color: 'var(--teal)', background: 'var(--teal-light)', flexShrink: 0 }}>
-                            {uploadingId === slotKey ? '…' : `+${i + 1}`}
-                            <input type="file" accept="image/*" style={{ display: 'none' }}
-                              disabled={uploadingId === slotKey}
-                              onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(m._id, f, field) }} />
-                          </label>
-                        )
-                      })}
-                    </div>
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={() => dispatch({ type: 'OPEN_EDIT', medicine: m })}
-                        style={{ fontSize: 12, color: 'var(--teal)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: 500 }}>
-                        Edit
-                      </button>
+              {loading ? (
+                <SkeletonRows n={limit > 10 ? 8 : limit} />
+              ) : medicines.length === 0 ? (
+                <tr>
+                  <td colSpan={7} style={{ padding: '60px 0', textAlign: 'center' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--border)" strokeWidth="1.5">
+                        <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/>
+                      </svg>
+                      <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>No medicines found</p>
+                      <p style={{ fontSize: 12, color: 'var(--ink-light)', margin: 0 }}>
+                        {isFiltered ? 'Try a different search or clear filters' : 'Add your first medicine using the button above'}
+                      </p>
                     </div>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                medicines.map(m => (
+                  <tr
+                    key={m._id}
+                    style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.1s' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(13,148,136,0.04)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = '')}
+                  >
+                    {/* Medicine name */}
+                    <td style={{ padding: '14px 16px', minWidth: 180 }}>
+                      <p style={{ fontWeight: 600, color: 'var(--ink)', fontSize: 13, margin: 0 }}>{m.medicine_name}</p>
+                      {m.salt_composition && (
+                        <p style={{ fontSize: 11, color: 'var(--ink-light)', marginTop: 3, margin: '3px 0 0' }}>{m.salt_composition}</p>
+                      )}
+                    </td>
+
+                    {/* Generic name */}
+                    <td style={{ padding: '14px 16px', color: 'var(--ink-light)', minWidth: 130 }}>
+                      {m.generic_name}
+                    </td>
+
+                    {/* Category */}
+                    <td style={{ padding: '14px 16px' }}>
+                      <span style={{
+                        fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999,
+                        background: 'var(--teal-light)', color: 'var(--teal-dark)',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {m.drug_category}
+                      </span>
+                    </td>
+
+                    {/* Color */}
+                    <td style={{ padding: '14px 16px' }}>
+                      {m.color ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{
+                            display: 'inline-block', width: 14, height: 14, borderRadius: '50%',
+                            background: m.color, border: '1.5px solid rgba(0,0,0,0.12)', flexShrink: 0,
+                          }} />
+                          <span style={{ fontSize: 12, color: 'var(--ink-light)' }}>{m.color}</span>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: 12, color: 'var(--ink-light)', opacity: 0.4 }}>—</span>
+                      )}
+                    </td>
+
+                    {/* Common usage */}
+                    <td style={{
+                      padding: '14px 16px', fontSize: 12, color: 'var(--ink-light)',
+                      maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {m.common_usage}
+                    </td>
+
+                    {/* Images */}
+                    <td style={{ padding: '14px 16px' }}>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {(['medicine_image', 'medicine_image_2', 'medicine_image_3'] as const).map((field, i) => {
+                          const url = m[field]
+                          const slotKey = `${m._id}_${field}`
+                          return url ? (
+                            <div
+                              key={field}
+                              onClick={() => setViewingImage({ url, name: m.medicine_name })}
+                              onMouseEnter={e => {
+                                const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+                                setHoveredImage({ url, x: rect.left + rect.width / 2, y: rect.top })
+                              }}
+                              onMouseLeave={() => setHoveredImage(null)}
+                              style={{
+                                width: 48, height: 48, borderRadius: 8, overflow: 'hidden',
+                                border: '1.5px solid var(--border)', cursor: 'zoom-in',
+                                background: '#f5f5f3', flexShrink: 0,
+                                boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+                              }}
+                            >
+                              <img src={url} alt={`${m.medicine_name} ${i + 1}`}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                            </div>
+                          ) : (
+                            <label key={field} style={{
+                              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              width: 48, height: 48, borderRadius: 8, border: '1.5px dashed var(--border)',
+                              fontSize: 11, color: 'var(--teal)', background: 'var(--teal-light)', flexShrink: 0,
+                            }}>
+                              {uploadingId === slotKey ? '…' : `+${i + 1}`}
+                              <input type="file" accept="image/*" style={{ display: 'none' }}
+                                disabled={uploadingId === slotKey}
+                                onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(m._id, f, field) }} />
+                            </label>
+                          )
+                        })}
+                      </div>
+                    </td>
+
+                    {/* Actions */}
+                    <td style={{ padding: '14px 16px' }}>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        <button
+                          onClick={() => dispatch({ type: 'OPEN_EDIT', medicine: m })}
+                          style={{
+                            fontSize: 12, color: 'var(--teal)', background: 'var(--teal-light)',
+                            border: '1px solid rgba(13,148,136,0.2)', borderRadius: 7,
+                            cursor: 'pointer', padding: '5px 12px', fontFamily: 'var(--font-sans)',
+                            fontWeight: 500, transition: 'background 0.1s',
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(13,148,136,0.15)')}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'var(--teal-light)')}
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
-          </div>
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="pagination-bar">
-              <p style={{ fontSize: 11, color: 'var(--ink-light)' }}>
-                Showing {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total}
-              </p>
-              <div className="pagination-controls">
-                <button disabled={page === 1} onClick={() => setPage(p => p - 1)}
-                  className="btn btn-ghost btn-sm" style={{ opacity: page === 1 ? .4 : 1 }}>Prev</button>
-                <span style={{ fontSize: 12, color: 'var(--ink-light)' }}>{page} / {totalPages}</span>
-                <button disabled={page === totalPages} onClick={() => setPage(p => p + 1)}
-                  className="btn btn-ghost btn-sm" style={{ opacity: page === totalPages ? .4 : 1 }}>Next</button>
-              </div>
-            </div>
-          )}
         </div>
-      )}
 
-      {!loading && (
-        <p style={{ fontSize: 11, color: 'var(--ink-light)', marginTop: 10, textAlign: 'right' }}>
-          {total} medicine{total !== 1 ? 's' : ''} in database
-        </p>
-      )}
+        {/* ── Pagination ─────────────────────────────────────────────────── */}
+        {!loading && totalPages > 1 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '12px 20px', borderTop: '1px solid var(--border)',
+            background: 'rgba(0,0,0,0.01)', flexWrap: 'wrap', gap: 10,
+          }}>
+            <p style={{ fontSize: 12, color: 'var(--ink-light)', margin: 0 }}>
+              Showing {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total.toLocaleString()}
+            </p>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button
+                disabled={page === 1}
+                onClick={() => setPage(p => p - 1)}
+                style={{
+                  padding: '5px 10px', borderRadius: 7, border: '1px solid var(--border)',
+                  background: 'var(--surface)', cursor: page === 1 ? 'not-allowed' : 'pointer',
+                  opacity: page === 1 ? 0.4 : 1, fontSize: 12, color: 'var(--ink)',
+                  fontFamily: 'var(--font-sans)', transition: 'background 0.1s',
+                }}
+              >← Prev</button>
 
-      {/* Add / Edit Modal */}
+              {pageNumbers().map((p, i) =>
+                p === '…' ? (
+                  <span key={`e${i}`} style={{ padding: '5px 4px', fontSize: 12, color: 'var(--ink-light)' }}>…</span>
+                ) : (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    style={{
+                      padding: '5px 10px', borderRadius: 7, border: '1px solid var(--border)',
+                      background: page === p ? 'var(--teal)' : 'var(--surface)',
+                      color: page === p ? '#fff' : 'var(--ink)',
+                      cursor: 'pointer', fontSize: 12, fontFamily: 'var(--font-sans)',
+                      fontWeight: page === p ? 600 : 400, transition: 'background 0.1s',
+                      minWidth: 34,
+                    }}
+                  >{p}</button>
+                )
+              )}
+
+              <button
+                disabled={page === totalPages}
+                onClick={() => setPage(p => p + 1)}
+                style={{
+                  padding: '5px 10px', borderRadius: 7, border: '1px solid var(--border)',
+                  background: 'var(--surface)', cursor: page === totalPages ? 'not-allowed' : 'pointer',
+                  opacity: page === totalPages ? 0.4 : 1, fontSize: 12, color: 'var(--ink)',
+                  fontFamily: 'var(--font-sans)', transition: 'background 0.1s',
+                }}
+              >Next →</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Add / Edit Modal ─────────────────────────────────────────────── */}
       {modal.open && (
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal-box" style={{ maxWidth: 540 }} onClick={e => e.stopPropagation()}>
@@ -557,81 +822,41 @@ export default function MedicinePrescriptionsPage() {
         </div>
       )}
 
-      {/* Delete Confirm Modal */}
-      {deletingId && (
-        <div className="modal-overlay" onClick={() => setDeletingId(null)}>
-          <div className="modal-box" style={{ maxWidth: 360 }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>Delete Medicine?</h3>
-            <p style={{ fontSize: 13, color: 'var(--ink-light)', marginBottom: 22 }}>This action cannot be undone.</p>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={() => setDeletingId(null)} className="btn btn-ghost" style={{ flex: 1 }}>Cancel</button>
-              <button onClick={() => handleDelete(deletingId)} className="btn btn-danger" style={{ flex: 1 }}>Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Hover Image Preview */}
+      {/* ── Hover Image Preview ──────────────────────────────────────────── */}
       {hoveredImage && (
-        <div
-          style={{
-            position: 'fixed',
-            left: hoveredImage.x,
-            top: hoveredImage.y - 8,
-            transform: 'translate(-50%, -100%)',
-            zIndex: 999,
-            pointerEvents: 'none',
-            background: 'var(--surface)',
-            border: '1.5px solid var(--border)',
-            borderRadius: 12,
-            padding: 6,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.22)',
-            animation: 'fadeInUp 0.12s ease',
-          }}
-        >
-          <img
-            src={hoveredImage.url}
-            alt="preview"
-            style={{ width: 180, height: 180, objectFit: 'contain', borderRadius: 8, display: 'block' }}
-          />
+        <div style={{
+          position: 'fixed', left: hoveredImage.x, top: hoveredImage.y - 8,
+          transform: 'translate(-50%, -100%)', zIndex: 999, pointerEvents: 'none',
+          background: 'var(--surface)', border: '1.5px solid var(--border)', borderRadius: 12,
+          padding: 6, boxShadow: '0 8px 32px rgba(0,0,0,0.22)', animation: 'fadeInUp 0.12s ease',
+        }}>
+          <img src={hoveredImage.url} alt="preview"
+            style={{ width: 180, height: 180, objectFit: 'contain', borderRadius: 8, display: 'block' }} />
         </div>
       )}
 
-      {/* Image Lightbox */}
+      {/* ── Image Lightbox ───────────────────────────────────────────────── */}
       {viewingImage && (
-        <div
-          onClick={() => setViewingImage(null)}
-          style={{
-            position: 'fixed', inset: 0, zIndex: 1000,
-            background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              background: '#000', borderRadius: 16,
-              padding: 20, maxWidth: '90vw', maxHeight: '90vh',
-              display: 'flex', flexDirection: 'column', gap: 14,
-              boxShadow: '0 24px 60px rgba(0,0,0,0.35)',
-            }}
-          >
+        <div onClick={() => setViewingImage(null)} style={{
+          position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)',
+          backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: '#000', borderRadius: 16, padding: 20,
+            maxWidth: '90vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', gap: 14,
+            boxShadow: '0 24px 60px rgba(0,0,0,0.35)',
+          }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24 }}>
               <p style={{ fontSize: 14, fontWeight: 600, color: '#fff', margin: 0 }}>{viewingImage.name}</p>
-              <button
-                onClick={() => setViewingImage(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.6)', display: 'flex', padding: 2 }}
-              >
+              <button onClick={() => setViewingImage(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.6)', display: 'flex', padding: 2 }}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                 </svg>
               </button>
             </div>
-            <img
-              src={viewingImage.url}
-              alt={viewingImage.name}
-              style={{ maxWidth: '80vw', maxHeight: '70vh', objectFit: 'contain', borderRadius: 10, display: 'block' }}
-            />
+            <img src={viewingImage.url} alt={viewingImage.name}
+              style={{ maxWidth: '80vw', maxHeight: '70vh', objectFit: 'contain', borderRadius: 10, display: 'block' }} />
           </div>
         </div>
       )}
@@ -639,6 +864,12 @@ export default function MedicinePrescriptionsPage() {
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes fadeInUp { from { opacity: 0; transform: translate(-50%, -95%); } to { opacity: 1; transform: translate(-50%, -100%); } }
+        @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+        .sk {
+          background: linear-gradient(90deg, var(--border) 25%, rgba(0,0,0,0.04) 50%, var(--border) 75%);
+          background-size: 400px 100%;
+          animation: shimmer 1.4s ease infinite;
+        }
       `}</style>
     </AppShell>
   )

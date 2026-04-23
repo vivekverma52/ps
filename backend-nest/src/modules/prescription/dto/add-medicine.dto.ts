@@ -20,4 +20,8 @@ export class AddMedicineDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsString()
+  with_food?: string;
 }

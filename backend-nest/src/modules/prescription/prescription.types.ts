@@ -17,6 +17,7 @@ export interface ManualMedicine {
   frequency: string;
   course: string;
   description: string | null;
+  with_food?: string | null;
 }
 
 /** OCR-extracted medicine from the AI service */
@@ -25,9 +26,8 @@ export interface OcrMedicine {
   dosage: string | null;
   instructions: string | null;
   duration: string | null;
-  time_of_day: string[] | null;
-  with_food: boolean | null;
-  text?: Record<string, string>;
+  time_of_day: string | null;
+  with_food: string | null;
 }
 
 // ── OCR SQS message payload ───────────────────────────────────────────────────
@@ -97,32 +97,22 @@ export interface RenderMedicine {
   dosage: string | null;
   instructions: string | null;
   duration: string | null;
-  time_of_day: string[] | null;
-  with_food: boolean | null;
-  text: Record<string, string>;
+  time_of_day: string | null;
+  with_food: string | null;
 }
 
 export interface RenderPayload {
-  status: 'success';
   request_id: string;
   language: string;
   interpreted_data: {
     patient_details: {
       name: string;
-      contact: string;
-      date: string;
-      age: string | null;
-      gender: string | null;
+      age: string | number | null;
     };
     doctor_details: {
       name: string;
       specialization: string | null;
-      clinic: string | null;
-      registration: string | null;
     };
     medicines: RenderMedicine[];
-    summary: string | null;
-    follow_up: string | null;
-    emergency_contact: string | null;
   };
 }

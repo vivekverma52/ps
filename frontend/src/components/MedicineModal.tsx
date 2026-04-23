@@ -49,7 +49,7 @@ export default function MedicineModal({ prescriptionId, medicine, onClose, onAdd
 
   const searchMedicines = async (q: string) => {
     setSelectedMedicine(q)
-    if (q.length < 1) { setSuggestions([]); return }
+    if (q.trim().length < 2) { setSuggestions([]); setShowSuggestions(false); return }
     try {
       const res = await api.get(`/prescriptions/medicines/search?q=${encodeURIComponent(q)}`)
       setSuggestions(res.data.data)
@@ -120,7 +120,7 @@ export default function MedicineModal({ prescriptionId, medicine, onClose, onAdd
               ref={searchRef}
               type="text"
               className="input-field"
-              placeholder="Type medicine name (e.g. Zifi 200)"
+              placeholder="Type at least 2 letters to search…"
               value={selectedMedicine}
               onChange={(e) => searchMedicines(e.target.value)}
               onFocus={() => selectedMedicine && setShowSuggestions(true)}

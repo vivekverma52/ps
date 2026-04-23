@@ -5,6 +5,7 @@ import api from '../services/api'
 import AppShell from '../components/layout/AppShell'
 import { DOCTOR_NAV } from '../constants/nav'
 import { StatusBadge } from '../components/ui/StatusBadge'
+import { langLabel } from '../utils/language'
 
 interface Prescription {
   id: string
@@ -180,7 +181,7 @@ export default function PrescriptionDetailPage() {
                     ['Doctor',   `Dr. ${prescription.doctor_name}`],
                     ['Patient',  prescription.patient_name],
                     ['Mobile',   prescription.patient_phone || '—'],
-                    ['Language', prescription.language],
+                    ['Language', langLabel(prescription.language)],
                   ].map(([label, value]) => (
                     <div key={label}>
                       <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 4 }}>{label}</p>

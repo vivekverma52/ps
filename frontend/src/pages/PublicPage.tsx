@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import axios from 'axios'
+import { langLabel } from '../utils/language'
 
 interface Medicine {
   id: string
@@ -83,7 +84,7 @@ export default function PublicPage() {
           <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-50">
               <h2 className="font-semibold text-gray-900 text-sm">Prescription Video</h2>
-              <p className="text-xs text-gray-400 mt-0.5">In {data.language}</p>
+              <p className="text-xs text-gray-400 mt-0.5">In {langLabel(data.language)}</p>
             </div>
             <video
               src={data.video_url}

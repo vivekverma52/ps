@@ -56,7 +56,7 @@ export default function HomePage() {
     try {
       const form = new FormData()
       // No patient_name / patient_phone — backend defaults to "Quick Upload" / "0000000000"
-      form.append('language', 'Hindi')
+      form.append('language', 'hi')
       form.append('image', quickFile)
       const res = await api.post('/prescriptions', form)
       const prescription = res.data.data

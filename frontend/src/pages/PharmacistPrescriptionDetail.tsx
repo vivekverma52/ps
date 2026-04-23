@@ -6,6 +6,7 @@ import api from '../services/api'
 import AppShell from '../components/layout/AppShell'
 import { PHARMACIST_NAV } from '../constants/nav'
 import { StatusBadge } from '../components/ui/StatusBadge'
+import { langLabel } from '../utils/language'
 
 interface Medicine {
   id: string
@@ -54,8 +55,20 @@ interface Prescription {
   interpreted_data?: InterpretedData
 }
 
-const FREQ_OPTIONS = ['Morning', 'Afternoon', 'Night']
-const EMPTY_FORM = { name: '', quantity: '1', frequency: [] as string[], course: '', description: '' }
+const TIME_OF_DAY_OPTIONS = ['Morning', 'Afternoon', 'Night'] as const
+const FOOD_OPTIONS_MANUAL = ['Before food', 'After food', 'With food'] as const
+const DOSAGE_OPTIONS = [
+  '1/4 tablet', '1/2 tablet', '3/4 tablet',
+  '1 tablet', '1.5 tablets', '2 tablets', '3 tablets',
+  '1 capsule', '2 capsules',
+  '2.5 ml', '5 ml', '10 ml', '15 ml', '20 ml',
+  '1 drop', '2 drops', '1 puff', '2 puffs',
+  '1 sachet',
+]
+const DURATION_OPTIONS = Array.from({ length: 30 }, (_, i) =>
+  i === 0 ? '1 day' : `${i + 1} days`
+)
+const EMPTY_FORM = { name: '', quantity: '', frequency: [] as string[], course: '', description: '', with_food: '' }
 
 // ── Shared field styles ──────────────────────────────────────────────────────
 const field: React.CSSProperties = {
@@ -76,24 +89,12 @@ function MedicineForm({
   onCancel?: () => void
 }) {
   const [form, setForm] = useState(initial)
-  const [allMedicines, setAllMedicines] = useState<string[]>([])
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [showSug, setShowSug] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const nameRef    = useRef<HTMLInputElement>(null)
   const sugRef     = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Load full medicine list from MongoDB on mount
-  useEffect(() => {
-    api.get('/prescriptions/medicines/search?q=')
-      .then(res => {
-        const data: string[] = res.data.data ?? []
-        setAllMedicines(data)
-        setSuggestions(data)
-      })
-      .catch(() => {})
-  }, [])
 
   // Close suggestions on outside click
   useEffect(() => {
@@ -109,19 +110,19 @@ function MedicineForm({
   const searchMedicines = (q: string) => {
     setForm(f => ({ ...f, name: q }))
     if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (q.trim().length < 2) { setSuggestions([]); setShowSug(false); return }
     debounceRef.current = setTimeout(async () => {
       try {
         const res = await api.get(`/prescriptions/medicines/search?q=${encodeURIComponent(q)}`)
         const data: string[] = res.data.data ?? []
         setSuggestions(data)
         setShowSug(data.length > 0)
-      } catch { setSuggestions(allMedicines) }
+      } catch { setSuggestions([]) }
     }, 300)
   }
 
   const handleFocus = () => {
-    setSuggestions(form.name.trim() ? suggestions : allMedicines)
-    setShowSug(true)
+    if (suggestions.length > 0) setShowSug(true)
   }
 
   const toggleFreq = (f: string) => {
@@ -136,18 +137,18 @@ function MedicineForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.name.trim()) return toast.error('Medicine name is required')
-    if (form.frequency.length === 0) return toast.error('Select at least one frequency')
-    if (!form.course.trim()) return toast.error('Duration / course is required')
+    if (!form.course.trim()) return toast.error('Duration is required')
 
     setSubmitting(true)
     try {
       const body: any = {
-        name: form.name.trim(),
-        quantity: form.quantity || '1',
+        name:      form.name.trim(),
+        quantity:  form.quantity.trim() || '1',
         frequency: form.frequency.join(', '),
-        course: form.course.trim(),
+        course:    form.course.trim(),
       }
-      if (form.description.trim()) body.description = form.description.trim()
+      if (form.with_food)            body.with_food   = form.with_food
+      if (form.description.trim())   body.description = form.description.trim()
 
       if (initial.id) {
         await api.put(`/prescriptions/${prescriptionId}/medicines/${initial.id}`, body)
@@ -165,15 +166,15 @@ function MedicineForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-      {/* Medicine name + autocomplete */}
+      {/* Medicine name */}
       <div style={{ position: 'relative' }}>
         <label style={lbl}>Medicine Name *</label>
         <input
           ref={nameRef}
           style={field}
-          placeholder="Click or type to search medicines"
+          placeholder="Type at least 2 letters to search…"
           value={form.name}
           autoFocus={!initial.id}
           onChange={e => searchMedicines(e.target.value)}
@@ -184,7 +185,7 @@ function MedicineForm({
           <div ref={sugRef} style={{
             position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, marginTop: 2,
             background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
-            boxShadow: '0 4px 16px rgba(0,0,0,.1)', maxHeight: 180, overflowY: 'auto',
+            boxShadow: '0 4px 20px rgba(0,0,0,.12)', maxHeight: 200, overflowY: 'auto',
           }}>
             {suggestions.map(s => (
               <button key={s} type="button"
@@ -203,46 +204,73 @@ function MedicineForm({
         )}
       </div>
 
-      {/* Quantity + Course */}
+      {/* Dosage + Duration */}
       <div className="form-grid-2">
         <div>
-          <label style={lbl}>Quantity per Day *</label>
-          <input style={field} type="number" min="1" max="10" value={form.quantity}
-            onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} />
+          <label style={lbl}>Dosage</label>
+          <select style={field} value={form.quantity}
+            onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))}>
+            <option value="">Select dosage…</option>
+            {DOSAGE_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
         </div>
         <div>
-          <label style={lbl}>Duration / Course *</label>
-          <input style={field} placeholder="e.g. 5 Days" value={form.course}
-            onChange={e => setForm(f => ({ ...f, course: e.target.value }))} />
+          <label style={lbl}>Duration *</label>
+          <select style={field} value={form.course}
+            onChange={e => setForm(f => ({ ...f, course: e.target.value }))}>
+            <option value="">Select duration…</option>
+            {DURATION_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
         </div>
       </div>
 
-      {/* Frequency checkboxes */}
+      {/* Time of Day */}
       <div>
-        <label style={lbl}>Frequency *</label>
-        <div style={{ display: 'flex', gap: 10 }}>
-          {FREQ_OPTIONS.map(opt => {
-            const checked = form.frequency.includes(opt)
+        <label style={lbl}>Time of Day</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {TIME_OF_DAY_OPTIONS.map(slot => {
+            const checked = form.frequency.includes(slot)
             return (
-              <button key={opt} type="button" onClick={() => toggleFreq(opt)} style={{
-                display: 'flex', alignItems: 'center', gap: 7, padding: '7px 13px',
-                borderRadius: 9, border: `1.5px solid ${checked ? 'var(--teal)' : 'var(--border)'}`,
+              <button key={slot} type="button" onClick={() => toggleFreq(slot)} style={{
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                padding: '8px 0', borderRadius: 9,
+                border: `1.5px solid ${checked ? 'var(--teal)' : 'var(--border)'}`,
                 background: checked ? 'var(--teal-light)' : 'var(--surface)',
-                cursor: 'pointer', fontSize: 12, fontWeight: 500,
+                cursor: 'pointer', fontSize: 12, fontWeight: 600,
                 color: checked ? 'var(--teal-dark)' : 'var(--ink-light)',
                 fontFamily: 'var(--font-sans)', transition: 'all .12s',
               }}>
                 <span style={{
-                  width: 14, height: 14, borderRadius: 4, border: `2px solid ${checked ? 'var(--teal)' : 'var(--border)'}`,
+                  width: 14, height: 14, borderRadius: 4, flexShrink: 0,
+                  border: `2px solid ${checked ? 'var(--teal)' : 'var(--border)'}`,
                   background: checked ? 'var(--teal)' : 'none',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
-                  {checked && (
-                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5">
-                      <path d="M20 6L9 17l-5-5"/>
-                    </svg>
-                  )}
+                  {checked && <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5"><path d="M20 6L9 17l-5-5"/></svg>}
                 </span>
+                {slot}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* With Food */}
+      <div>
+        <label style={lbl}>With Food</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {FOOD_OPTIONS_MANUAL.map(opt => {
+            const selected = form.with_food === opt
+            return (
+              <button key={opt} type="button"
+                onClick={() => setForm(f => ({ ...f, with_food: selected ? '' : opt }))}
+                style={{
+                  flex: 1, padding: '7px 0', borderRadius: 9, fontSize: 11, fontWeight: 600,
+                  border: `1.5px solid ${selected ? 'var(--teal)' : 'var(--border)'}`,
+                  background: selected ? 'var(--teal-light)' : 'var(--surface)',
+                  color: selected ? 'var(--teal-dark)' : 'var(--ink-light)',
+                  cursor: 'pointer', fontFamily: 'var(--font-sans)', transition: 'all .12s',
+                }}>
                 {opt}
               </button>
             )
@@ -250,22 +278,26 @@ function MedicineForm({
         </div>
       </div>
 
-      {/* Description */}
+      {/* Instructions */}
       <div>
-        <label style={lbl}>Instructions (optional)</label>
-        <textarea style={{ ...field, resize: 'none', lineHeight: 1.5 }} rows={2}
-          placeholder="e.g. After food, before sleep…"
+        <label style={lbl}>Instructions</label>
+        <input style={field} placeholder="e.g. May cause drowsiness"
           value={form.description}
           onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
       </div>
 
       {/* Buttons */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button type="submit" disabled={submitting} className="btn btn-teal" style={{ flex: 1, justifyContent: 'center', opacity: submitting ? .65 : 1 }}>
-          {submitting ? 'Saving…' : submitLabel}
+      <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+        <button type="submit" disabled={submitting} style={{
+          flex: 1, padding: '9px 0', borderRadius: 9, border: 'none',
+          background: 'var(--teal)', color: '#fff', fontWeight: 600,
+          fontSize: 13, cursor: submitting ? 'not-allowed' : 'pointer',
+          opacity: submitting ? .65 : 1, fontFamily: 'var(--font-sans)',
+        }}>
+          {submitting ? '…' : submitLabel}
         </button>
         {onCancel && (
-          <button type="button" className="btn btn-ghost" onClick={onCancel} style={{ flex: 'none', padding: '0 18px' }}>
+          <button type="button" onClick={onCancel} className="btn btn-ghost" style={{ flex: 'none', padding: '0 18px' }}>
             Cancel
           </button>
         )}
@@ -275,8 +307,6 @@ function MedicineForm({
 }
 
 // ── OCR Medicine inline edit / add form ──────────────────────────────────────
-const TIME_SLOTS = ['Morning', 'Afternoon', 'Night'] as const
-const FOOD_OPTIONS = ['Before food', 'After food', 'With food'] as const
 
 const EMPTY_OCR = {
   medicine_name: '',
@@ -285,7 +315,6 @@ const EMPTY_OCR = {
   duration: '',
   time_of_day: [] as string[],
   with_food: '',
-  text: { en: '' },
 }
 
 function OcrMedicineForm({ initial, onSave, onCancel }: {
@@ -299,25 +328,12 @@ function OcrMedicineForm({ initial, onSave, onCancel }: {
     time_of_day: Array.isArray(initial.time_of_day)
       ? initial.time_of_day
       : initial.time_of_day ? (initial.time_of_day as string).split(',').map(s => s.trim()).filter(Boolean) : [],
-    text: initial.text ?? { en: '' },
   })
-  const [allMedicines, setAllMedicines] = useState<string[]>([])
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [showSug, setShowSug] = useState(false)
   const nameRef     = useRef<HTMLInputElement>(null)
   const sugRef      = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Load full medicine list from MongoDB on mount
-  useEffect(() => {
-    api.get('/prescriptions/medicines/search?q=')
-      .then(res => {
-        const data: string[] = res.data.data ?? []
-        setAllMedicines(data)
-        setSuggestions(data)
-      })
-      .catch(() => {})
-  }, [])
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -331,19 +347,19 @@ function OcrMedicineForm({ initial, onSave, onCancel }: {
   const searchMedicines = (q: string) => {
     setForm(f => ({ ...f, medicine_name: q }))
     if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (q.trim().length < 2) { setSuggestions([]); setShowSug(false); return }
     debounceRef.current = setTimeout(async () => {
       try {
         const res = await api.get(`/prescriptions/medicines/search?q=${encodeURIComponent(q)}`)
         const data: string[] = res.data.data ?? []
         setSuggestions(data)
         setShowSug(data.length > 0)
-      } catch { setSuggestions(allMedicines) }
+      } catch { setSuggestions([]) }
     }, 300)
   }
 
   const handleFocusOcr = () => {
-    setSuggestions(form.medicine_name.trim() ? suggestions : allMedicines)
-    setShowSug(true)
+    if (suggestions.length > 0) setShowSug(true)
   }
 
   const setField = (k: 'dosage' | 'instructions' | 'duration' | 'with_food') =>
@@ -372,7 +388,7 @@ function OcrMedicineForm({ initial, onSave, onCancel }: {
           autoFocus
           autoComplete="off"
           value={form.medicine_name}
-          placeholder="Click or type to search medicines…"
+          placeholder="Type at least 2 letters to search…"
           onChange={e => searchMedicines(e.target.value)}
           onFocus={handleFocusOcr}
         />
@@ -403,11 +419,19 @@ function OcrMedicineForm({ initial, onSave, onCancel }: {
       <div className="form-grid-2">
         <div>
           <label style={lbl}>Dosage</label>
-          <input style={field} value={form.dosage} onChange={setField('dosage')} placeholder="e.g. 1 tablet" />
+          <select style={field} value={form.dosage}
+            onChange={e => setForm(f => ({ ...f, dosage: e.target.value }))}>
+            <option value="">Select dosage…</option>
+            {DOSAGE_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
         </div>
         <div>
           <label style={lbl}>Duration</label>
-          <input style={field} value={form.duration} onChange={setField('duration')} placeholder="e.g. 5 days" />
+          <select style={field} value={form.duration}
+            onChange={e => setForm(f => ({ ...f, duration: e.target.value }))}>
+            <option value="">Select duration…</option>
+            {DURATION_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
+          </select>
         </div>
       </div>
 
@@ -415,7 +439,7 @@ function OcrMedicineForm({ initial, onSave, onCancel }: {
       <div>
         <label style={lbl}>Time of Day</label>
         <div style={{ display: 'flex', gap: 8 }}>
-          {TIME_SLOTS.map(slot => {
+          {TIME_OF_DAY_OPTIONS.map(slot => {
             const checked = form.time_of_day.includes(slot)
             return (
               <button key={slot} type="button" onClick={() => toggleTime(slot)} style={{
@@ -446,7 +470,7 @@ function OcrMedicineForm({ initial, onSave, onCancel }: {
       <div>
         <label style={lbl}>With Food</label>
         <div style={{ display: 'flex', gap: 8 }}>
-          {FOOD_OPTIONS.map(opt => {
+          {FOOD_OPTIONS_MANUAL.map(opt => {
             const selected = form.with_food === opt
             return (
               <button key={opt} type="button"
@@ -469,15 +493,6 @@ function OcrMedicineForm({ initial, onSave, onCancel }: {
       <div>
         <label style={lbl}>Instructions</label>
         <input style={field} value={form.instructions} onChange={setField('instructions')} placeholder="e.g. May cause drowsiness" />
-      </div>
-
-      {/* English text for video */}
-      <div>
-        <label style={lbl}>Display Text (English)</label>
-        <input style={field}
-          value={form.text?.en ?? ''}
-          onChange={e => setForm(f => ({ ...f, text: { en: e.target.value } }))}
-          placeholder="e.g. Take Paracetamol after meals" />
       </div>
 
       {/* Buttons */}
@@ -573,14 +588,17 @@ export default function PharmacistPrescriptionDetail() {
   const saveOcrMedicines = async (updatedMeds: typeof EMPTY_OCR[]) => {
     setOcrSaving(true)
     try {
-      // Always use prescription.id (UUID), never the URL param which may be access_token
       const rxId = prescription!.id
       const current = (prescription!.interpreted_data as any) ?? {}
+      const medicines = updatedMeds.map(m => ({
+        ...m,
+        time_of_day: Array.isArray(m.time_of_day) ? m.time_of_day.join(', ') : (m.time_of_day ?? ''),
+      }))
       const payload = {
         ...current,
         interpreted_data: {
           ...(current.interpreted_data ?? {}),
-          medicines: updatedMeds,
+          medicines,
         },
       }
       await api.put(`/prescriptions/${rxId}/interpreted-data`, payload)
@@ -603,7 +621,6 @@ export default function PharmacistPrescriptionDetail() {
           ? m.time_of_day
           : m.time_of_day ? String(m.time_of_day).split(',').map(s => s.trim()).filter(Boolean) : [],
         with_food: typeof m.with_food === 'string' ? m.with_food : '',
-        text: { en: m.text?.en ?? '' },
       }))
 
   const handleOcrEdit = async (idx: number, updated: typeof EMPTY_OCR) => {
@@ -811,7 +828,7 @@ export default function PharmacistPrescriptionDetail() {
             </div>
             <div className="info-grid-3">
               {[
-                ['Language', prescription.language],
+                ['Language', langLabel(prescription.language)],
                 ['Date', new Date(prescription.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })],
                 ['Medicines', `${prescription.interpreted_data?.medicines?.length ?? 0} added`],
               ].map(([label, value]) => (
@@ -826,7 +843,7 @@ export default function PharmacistPrescriptionDetail() {
       </div>
 
       {/* ── Main grid ── */}
-      <div className="detail-grid">
+      <div className="detail-grid" style={{ gridTemplateColumns: '240px 1fr' }}>
 
         {/* LEFT col: image + actions + qr */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -838,7 +855,7 @@ export default function PharmacistPrescriptionDetail() {
             </p>
             {prescription.image_url ? (
               <img src={prescription.image_url} alt="Prescription"
-                style={{ width: '100%', borderRadius: 10, objectFit: 'contain', maxHeight: 320, background: 'var(--cell)', border: '1px solid var(--border)' }} />
+                style={{ width: '100%', borderRadius: 10, objectFit: 'contain', maxHeight: 160, background: 'var(--cell)', border: '1px solid var(--border)' }} />
             ) : (
               <div style={{ height: 160, background: 'var(--cell)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px dashed var(--border)' }}>
                 <p style={{ fontSize: 13, color: 'var(--ink-light)' }}>No image uploaded</p>
@@ -946,366 +963,342 @@ export default function PharmacistPrescriptionDetail() {
             const hospital = extracted?.hospital_details
             const doctor = extracted?.doctor_details
             const isOcr = (ai as any).ocr_source === true
+            const ocrAccent = 'rgb(99,102,241)'
+            const ocrLight  = 'rgba(99,102,241,.12)'
+            const ocrBorder = 'rgba(99,102,241,.25)'
             return (
-              <div className="card" style={{ padding: '16px 18px', border: `1.5px solid ${isOcr ? 'rgba(99,102,241,.35)' : 'rgba(0,184,148,.3)'}`, background: isOcr ? 'linear-gradient(135deg, rgba(99,102,241,.04) 0%, var(--surface) 100%)' : 'linear-gradient(135deg, rgba(0,184,148,.04) 0%, var(--surface) 100%)' }}>
-                {/* Header */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ width: 28, height: 28, borderRadius: 8, background: isOcr ? 'rgba(99,102,241,.12)' : 'var(--teal-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {isOcr ? (
-                        /* Scan / OCR icon */
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgb(99,102,241)" strokeWidth="2">
-                          <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
-                          <line x1="3" y1="12" x2="21" y2="12"/>
-                        </svg>
-                      ) : (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2">
-                          <circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-                        </svg>
-                      )}
+              <div className="card" style={{ padding: '10px 14px', border: `1.5px solid ${isOcr ? 'rgba(99,102,241,.35)' : 'rgba(0,184,148,.3)'}`, background: isOcr ? 'linear-gradient(135deg, rgba(99,102,241,.04) 0%, var(--surface) 100%)' : 'linear-gradient(135deg, rgba(0,184,148,.04) 0%, var(--surface) 100%)' }}>
+
+                {/* ── Compact header ── */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 24, height: 24, borderRadius: 7, background: ocrLight, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={ocrAccent} strokeWidth="2">
+                        <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+                        <line x1="3" y1="12" x2="21" y2="12"/>
+                      </svg>
                     </div>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>
-                          {isOcr ? 'OCR Extracted Data' : 'AI Extracted Data'}
-                        </p>
-                        {isOcr && (
-                          <span style={{
-                            fontSize: 9, fontWeight: 800, letterSpacing: '.6px',
-                            padding: '2px 7px', borderRadius: 20,
-                            background: 'rgba(99,102,241,.12)', color: 'rgb(79,70,229)',
-                            border: '1px solid rgba(99,102,241,.25)',
-                            textTransform: 'uppercase',
-                          }}>
-                            OCR
-                          </span>
-                        )}
-                      </div>
-                      {ai.metadata?.processed_at && (
-                        <p style={{ fontSize: 10, color: 'var(--ink-light)', margin: 0 }}>
-                          Processed {new Date(ai.metadata.processed_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      )}
-                    </div>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>OCR Extracted Data</p>
+                    <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: '.5px', padding: '1px 6px', borderRadius: 20, background: ocrLight, color: 'rgb(79,70,229)', border: `1px solid ${ocrBorder}`, textTransform: 'uppercase' }}>OCR</span>
+                    {ai.metadata?.processed_at && (
+                      <span style={{ fontSize: 10, color: 'var(--ink-light)' }}>
+                        · {new Date(ai.metadata.processed_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
                   </div>
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 20, background: isOcr ? 'rgba(99,102,241,.1)' : 'var(--teal-light)', color: isOcr ? 'rgb(79,70,229)' : 'var(--teal-dark)' }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: ocrLight, color: 'rgb(79,70,229)' }}>
                     {ai.status === 'success' ? 'Success' : ai.status}
                   </span>
                 </div>
 
-                {/* ── Patient Details (editable) ── */}
-                <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 9, background: 'var(--cell)', border: '1px solid var(--border)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: editingPatient ? 10 : 0 }}>
-                    <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--ink-light)', textTransform: 'uppercase', letterSpacing: '.5px' }}>Patient Details</p>
-                    {!editingPatient && (
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        style={{ fontSize: 10 }}
-                        onClick={() => {
-                          setPatientForm({ patient_name: prescription.patient_name, patient_phone: prescription.patient_phone })
-                          setEditingPatient(true)
-                        }}>
+                {/* ── Compact info row: Patient · Hospital · Doctor ── */}
+                {!editingPatient ? (
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', borderRadius: 7, background: 'var(--cell)', border: '1px solid var(--border)', flex: 2, minWidth: 0 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontSize: 10, color: 'var(--ink-light)' }}>Patient: </span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{prescription.patient_name}</span>
+                        <span style={{ fontSize: 10, color: 'var(--ink-light)', marginLeft: 8 }}>· </span>
+                        <span style={{ fontSize: 12, color: 'var(--ink)' }}>{prescription.patient_phone}</span>
+                      </div>
+                      <button className="btn btn-ghost btn-sm" style={{ fontSize: 10, flexShrink: 0 }}
+                        onClick={() => { setPatientForm({ patient_name: prescription.patient_name, patient_phone: prescription.patient_phone }); setEditingPatient(true) }}>
                         Edit
                       </button>
-                    )}
-                  </div>
-
-                  {editingPatient ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div>
-                        <label style={{ ...lbl, marginBottom: 3 }}>Patient Name *</label>
-                        <input
-                          style={field}
-                          value={patientForm.patient_name}
-                          onChange={e => setPatientForm(f => ({ ...f, patient_name: e.target.value }))}
-                          placeholder="Patient full name"
-                        />
-                      </div>
-                      <div>
-                        <label style={{ ...lbl, marginBottom: 3 }}>Mobile Number *</label>
-                        <input
-                          style={field}
-                          value={patientForm.patient_phone}
-                          onChange={e => setPatientForm(f => ({ ...f, patient_phone: e.target.value }))}
-                          placeholder="10-digit number"
-                          type="tel"
-                          maxLength={10}
-                        />
-                      </div>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button
-                          className="btn btn-teal"
-                          style={{ flex: 1, justifyContent: 'center', fontSize: 12, opacity: savingPatient ? .65 : 1 }}
-                          disabled={savingPatient}
-                          onClick={handleSavePatient}>
-                          {savingPatient ? 'Saving…' : 'Save'}
-                        </button>
-                        <button
-                          className="btn btn-ghost"
-                          style={{ fontSize: 12 }}
-                          onClick={() => setEditingPatient(false)}>
-                          Cancel
-                        </button>
-                      </div>
                     </div>
-                  ) : (
-                    <div className="form-grid-2" style={{ marginTop: 8 }}>
-                      <div>
-                        <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 2 }}>Name</p>
-                        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{prescription.patient_name}</p>
-                      </div>
-                      <div>
-                        <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 2 }}>Mobile</p>
-                        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{prescription.patient_phone}</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Hospital + Doctor */}
-                {(hospital?.name || doctor?.name) && (
-                  <div className="form-grid-2" style={{ marginBottom: 12 }}>
                     {hospital?.name && (
-                      <div style={{ background: 'var(--cell)', borderRadius: 8, padding: '8px 10px' }}>
-                        <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 2 }}>Hospital</p>
-                        <p style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink)', lineHeight: 1.4 }}>{hospital.name}</p>
-                        {hospital.address && <p style={{ fontSize: 11, color: 'var(--ink-light)', marginTop: 2 }}>{hospital.address}</p>}
+                      <div style={{ padding: '5px 10px', borderRadius: 7, background: 'var(--cell)', border: '1px solid var(--border)', flex: 1, minWidth: 0 }}>
+                        <span style={{ fontSize: 10, color: 'var(--ink-light)' }}>Hospital: </span>
+                        <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink)' }}>{hospital.name}</span>
+                        {hospital.address && <span style={{ fontSize: 10, color: 'var(--ink-light)' }}>, {hospital.address}</span>}
                       </div>
                     )}
                     {doctor?.name && (
-                      <div style={{ background: 'var(--cell)', borderRadius: 8, padding: '8px 10px' }}>
-                        <p style={{ fontSize: 10, color: 'var(--ink-light)', marginBottom: 2 }}>Doctor</p>
-                        <p style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink)' }}>{doctor.name}</p>
-                        {doctor.qualifications && <p style={{ fontSize: 11, color: 'var(--ink-light)', marginTop: 2 }}>{doctor.qualifications}</p>}
+                      <div style={{ padding: '5px 10px', borderRadius: 7, background: 'var(--cell)', border: '1px solid var(--border)', flex: 1, minWidth: 0 }}>
+                        <span style={{ fontSize: 10, color: 'var(--ink-light)' }}>Doctor: </span>
+                        <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ink)' }}>{doctor.name}</span>
+                        {doctor.qualifications && <span style={{ fontSize: 10, color: 'var(--ink-light)' }}> · {doctor.qualifications}</span>}
                       </div>
                     )}
                   </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8, padding: '10px 12px', borderRadius: 9, background: 'var(--cell)', border: '1px solid var(--border)' }}>
+                    <div className="form-grid-2">
+                      <div>
+                        <label style={{ ...lbl, marginBottom: 3 }}>Patient Name *</label>
+                        <input style={field} value={patientForm.patient_name}
+                          onChange={e => setPatientForm(f => ({ ...f, patient_name: e.target.value }))} placeholder="Patient full name" autoFocus />
+                      </div>
+                      <div>
+                        <label style={{ ...lbl, marginBottom: 3 }}>Mobile *</label>
+                        <input style={field} value={patientForm.patient_phone} type="tel" maxLength={10}
+                          onChange={e => setPatientForm(f => ({ ...f, patient_phone: e.target.value }))} placeholder="10-digit number" />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn btn-teal btn-sm" disabled={savingPatient} onClick={handleSavePatient}>{savingPatient ? 'Saving…' : 'Save'}</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setEditingPatient(false)}>Cancel</button>
+                    </div>
+                  </div>
                 )}
 
-                {/* Extracted medicines — editable */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)' }}>
-                    Medicines ({extractedMeds.length})
-                  </p>
-                  <button
-                    onClick={() => { setShowAddOcr(true); setOcrEditIdx(null) }}
-                    className="btn btn-teal btn-sm"
-                    disabled={ocrSaving || showAddOcr}
-                    style={{ fontSize: 11 }}>
+                {/* ── Medicines: compact table ── */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink)', margin: 0 }}>Medicines ({extractedMeds.length})</p>
+                  <button onClick={() => { setShowAddOcr(true); setOcrEditIdx(null) }}
+                    className="btn btn-teal btn-sm" disabled={ocrSaving || showAddOcr} style={{ fontSize: 11 }}>
                     + Add Medicine
                   </button>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {extractedMeds.map((m, i) =>
-                    ocrEditIdx === i ? (
-                      /* ── Inline edit row ── */
-                      <div key={i} style={{ padding: 14, borderRadius: 10, background: 'rgba(99,102,241,.06)', border: '1.5px solid rgba(99,102,241,.25)' }}>
-                        <p style={{ fontSize: 11, fontWeight: 600, color: 'rgb(79,70,229)', marginBottom: 10 }}>Edit medicine #{i + 1}</p>
-                        <OcrMedicineForm
-                          initial={{
-                            medicine_name: m.medicine_name,
-                            dosage:        m.dosage        ?? '',
-                            instructions:  m.instructions  ?? '',
-                            duration:      m.duration      ?? '',
-                            time_of_day:   Array.isArray(m.time_of_day)
-                              ? m.time_of_day
-                              : m.time_of_day ? String(m.time_of_day).split(',').map(s => s.trim()).filter(Boolean) : [],
-                            with_food: typeof m.with_food === 'string' ? m.with_food : '',
-                            text: { en: m.text?.en ?? '' },
-                          }}
-                          onSave={updated => handleOcrEdit(i, updated)}
-                          onCancel={() => setOcrEditIdx(null)}
-                        />
-                      </div>
-                    ) : (
-                      /* ── Display row ── */
-                      <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '9px 12px', borderRadius: 9, background: 'var(--cell)', border: '1px solid var(--border)' }}>
-                        <div style={{ width: 22, height: 22, borderRadius: 6, background: 'rgba(99,102,241,.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: 'rgb(79,70,229)' }}>{i + 1}</span>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>{m.medicine_name}</p>
-                          {/* Time of day chips */}
-                          {(() => {
+                {extractedMeds.length === 0 && !showAddOcr ? (
+                  <p style={{ fontSize: 12, color: 'var(--ink-light)', fontStyle: 'italic', marginBottom: 4 }}>No medicines yet — click "+ Add Medicine".</p>
+                ) : extractedMeds.length > 0 && (() => {
+                  const thO: React.CSSProperties = {
+                    fontSize: 10, fontWeight: 700, color: 'var(--ink-light)', textTransform: 'uppercase',
+                    letterSpacing: '.5px', padding: '5px 10px', textAlign: 'left',
+                    background: 'var(--cell)', borderBottom: '1px solid var(--border)',
+                  }
+                  const tdO: React.CSSProperties = {
+                    fontSize: 12, color: 'var(--ink)', padding: '7px 10px',
+                    borderBottom: '1px solid var(--border)', verticalAlign: 'middle',
+                  }
+                  return (
+                    <div style={{ overflowX: 'auto', marginBottom: 8, borderRadius: 8, border: '1px solid var(--border)', overflow: 'hidden' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr>
+                            <th style={{ ...thO, width: 28 }}>#</th>
+                            <th style={thO}>Medicine</th>
+                            <th style={thO}>Dosage</th>
+                            <th style={thO}>Duration</th>
+                            <th style={thO}>Time</th>
+                            <th style={{ ...thO, width: 80 }}></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {extractedMeds.map((m, i) => {
                             const times: string[] = Array.isArray(m.time_of_day)
                               ? m.time_of_day
                               : m.time_of_day ? String(m.time_of_day).split(',').map(s => s.trim()).filter(Boolean) : []
-                            return times.length > 0 ? (
-                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 4 }}>
-                                {times.map(t => (
-                                  <span key={t} style={{
-                                    fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
-                                    background: 'rgba(99,102,241,.12)', color: 'rgb(79,70,229)',
-                                    border: '1px solid rgba(99,102,241,.25)',
-                                  }}>{t}</span>
-                                ))}
-                                {m.with_food && (
-                                  <span style={{
-                                    fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
-                                    background: 'rgba(0,184,148,.1)', color: 'var(--teal-dark)',
-                                    border: '1px solid rgba(0,184,148,.2)',
-                                  }}>{m.with_food}</span>
-                                )}
-                              </div>
-                            ) : null
-                          })()}
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px' }}>
-                            {m.dosage       && <span style={{ fontSize: 11, color: 'var(--ink-light)' }}>Dosage: <span style={{ color: 'var(--ink)' }}>{m.dosage}</span></span>}
-                            {m.duration     && <span style={{ fontSize: 11, color: 'var(--ink-light)' }}>Duration: <span style={{ color: 'var(--ink)' }}>{m.duration}</span></span>}
-                            {m.instructions && <span style={{ fontSize: 11, color: 'var(--ink-light)', width: '100%' }}>Instructions: <span style={{ color: 'var(--ink)' }}>{m.instructions}</span></span>}
-                            {m.text?.en     && <span style={{ fontSize: 11, color: 'var(--ink-light)', width: '100%' }}>Text: <span style={{ color: 'var(--ink)' }}>{m.text.en}</span></span>}
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                          <button
-                            onClick={() => { setOcrEditIdx(i); setShowAddOcr(false) }}
-                            className="btn btn-ghost btn-sm"
-                            disabled={ocrSaving}
-                            style={{ fontSize: 11 }}>
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleOcrDelete(i, m.medicine_name)}
-                            className="btn btn-ghost btn-sm"
-                            disabled={ocrSaving}
-                            style={{ fontSize: 11, color: '#ef4444' }}>
-                            {ocrSaving ? '…' : '✕'}
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  )}
+                            return (
+                              <tr key={i} style={{ background: ocrEditIdx === i ? 'rgba(99,102,241,.05)' : 'transparent' }}>
+                                <td style={{ ...tdO, textAlign: 'center' }}>
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: 'rgb(79,70,229)', background: ocrLight, borderRadius: 5, padding: '2px 6px' }}>{i + 1}</span>
+                                </td>
+                                <td style={{ ...tdO, fontWeight: 600 }}>{m.medicine_name}</td>
+                                <td style={{ ...tdO, color: 'var(--ink-light)', fontSize: 11 }}>{m.dosage || '—'}</td>
+                                <td style={{ ...tdO, fontSize: 11 }}>{m.duration || '—'}</td>
+                                <td style={tdO}>
+                                  <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                                    {times.map(t => (
+                                      <span key={t} style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 20, background: ocrLight, color: 'rgb(79,70,229)', border: `1px solid ${ocrBorder}`, whiteSpace: 'nowrap' }}>{t}</span>
+                                    ))}
+                                    {m.with_food && (
+                                      <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 20, background: 'rgba(0,184,148,.1)', color: 'var(--teal-dark)', border: '1px solid rgba(0,184,148,.2)', whiteSpace: 'nowrap' }}>{m.with_food}</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td style={tdO}>
+                                  <div style={{ display: 'flex', gap: 4 }}>
+                                    <button onClick={() => { setOcrEditIdx(i); setShowAddOcr(false) }}
+                                      style={{ padding: '3px 8px', borderRadius: 6, border: '1px solid var(--border)', background: ocrEditIdx === i ? ocrLight : 'var(--surface)', cursor: 'pointer', fontSize: 11, color: ocrEditIdx === i ? 'rgb(79,70,229)' : 'var(--ink-light)', fontFamily: 'var(--font-sans)' }}>
+                                      Edit
+                                    </button>
+                                    <button onClick={() => handleOcrDelete(i, m.medicine_name)} disabled={ocrSaving}
+                                      style={{ padding: '3px 7px', borderRadius: 6, border: '1px solid rgba(239,68,68,.2)', background: 'rgba(239,68,68,.06)', cursor: 'pointer', fontSize: 11, color: '#ef4444', fontFamily: 'var(--font-sans)' }}>
+                                      {ocrSaving ? '…' : '✕'}
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                })()}
 
-                  {extractedMeds.length === 0 && !showAddOcr && (
-                    <p style={{ fontSize: 12, color: 'var(--ink-light)', fontStyle: 'italic' }}>No medicines yet. Click "+ Add Medicine" to add one.</p>
-                  )}
-
-                  {/* ── Add new OCR medicine form ── */}
-                  {showAddOcr && (
-                    <div style={{ padding: 14, borderRadius: 10, background: 'rgba(99,102,241,.06)', border: '1.5px solid rgba(99,102,241,.25)' }}>
-                      <p style={{ fontSize: 11, fontWeight: 600, color: 'rgb(79,70,229)', marginBottom: 10 }}>Add Medicine</p>
+                {/* ── Edit / Add form below table ── */}
+                {ocrEditIdx !== null && (() => {
+                  const m = extractedMeds[ocrEditIdx]
+                  if (!m) return null
+                  return (
+                    <div style={{ padding: 12, borderRadius: 9, background: 'rgba(99,102,241,.06)', border: `1.5px solid ${ocrBorder}` }}>
+                      <p style={{ fontSize: 10, fontWeight: 700, color: 'rgb(79,70,229)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '.5px' }}>Editing #{ocrEditIdx + 1}: {m.medicine_name}</p>
                       <OcrMedicineForm
-                        initial={EMPTY_OCR}
-                        onSave={handleOcrAdd}
-                        onCancel={() => setShowAddOcr(false)}
+                        initial={{
+                          medicine_name: m.medicine_name,
+                          dosage:        m.dosage        ?? '',
+                          instructions:  m.instructions  ?? '',
+                          duration:      m.duration      ?? '',
+                          time_of_day:   Array.isArray(m.time_of_day) ? m.time_of_day : m.time_of_day ? String(m.time_of_day).split(',').map(s => s.trim()).filter(Boolean) : [],
+                          with_food:     typeof m.with_food === 'string' ? m.with_food : '',
+                        }}
+                        onSave={updated => handleOcrEdit(ocrEditIdx, updated)}
+                        onCancel={() => setOcrEditIdx(null)}
                       />
                     </div>
-                  )}
-                </div>
+                  )
+                })()}
+
+                {showAddOcr && (
+                  <div style={{ padding: 12, borderRadius: 9, background: 'rgba(99,102,241,.06)', border: `1.5px solid ${ocrBorder}` }}>
+                    <p style={{ fontSize: 10, fontWeight: 700, color: 'rgb(79,70,229)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '.5px' }}>Add Medicine</p>
+                    <OcrMedicineForm initial={EMPTY_OCR} onSave={handleOcrAdd} onCancel={() => setShowAddOcr(false)} />
+                  </div>
+                )}
               </div>
             )
           })()}
 
-          {/* ── Manual Medicines Panel (always visible) ── */}
+          {/* ── Manual Medicines Panel ── */}
           {(() => {
             const manualMeds: Medicine[] = prescription.interpreted_data?.medicines ?? []
+            const freqChipColor = (f: string) => {
+              if (f === 'Morning')   return { bg: 'rgba(251,191,36,.15)',  color: '#92400e', border: 'rgba(251,191,36,.4)' }
+              if (f === 'Afternoon') return { bg: 'rgba(249,115,22,.12)',  color: '#c2410c', border: 'rgba(249,115,22,.35)' }
+              if (f === 'Night')     return { bg: 'rgba(99,102,241,.12)',  color: '#4338ca', border: 'rgba(99,102,241,.3)' }
+              return { bg: 'var(--cell)', color: 'var(--ink-light)', border: 'var(--border)' }
+            }
             return (
-              <div className="card" style={{ padding: '16px 18px' }}>
+              <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+
                 {/* Header */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ width: 28, height: 28, borderRadius: 8, background: 'var(--teal-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2">
-                        <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/>
+                    <div style={{ width: 30, height: 30, borderRadius: 9, background: 'var(--teal-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2">
+                        <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+                        <rect x="3" y="14" width="7" height="7" rx="1"/>
+                        <path d="M17 14v6M14 17h6"/>
                       </svg>
                     </div>
                     <div>
-                      <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Medicines</p>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', margin: 0 }}>Medicines</p>
                       <p style={{ fontSize: 10, color: 'var(--ink-light)', margin: 0 }}>
-                        {manualMeds.length === 0 ? 'No medicines added yet' : `${manualMeds.length} medicine${manualMeds.length > 1 ? 's' : ''} added`}
+                        {manualMeds.length === 0 ? 'None added yet' : `${manualMeds.length} medicine${manualMeds.length > 1 ? 's' : ''}`}
                       </p>
                     </div>
                   </div>
-                  {!showAddManual && editManualId === null && (
-                    <button
-                      className="btn btn-teal btn-sm"
-                      onClick={() => { setShowAddManual(true); setEditManualId(null) }}
-                      style={{ fontSize: 11 }}>
-                      + Add Medicine
-                    </button>
+                  {(!prescription.interpreted_data || !(prescription.interpreted_data as any).ocr_source) && (
+                    <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 20, background: 'rgba(217,119,6,.1)', color: '#92400e', border: '1px solid rgba(217,119,6,.2)' }}>
+                      Manual mode
+                    </span>
                   )}
                 </div>
 
-                {/* No OCR notice — shown only when OCR has not processed this prescription */}
-                {(!prescription.interpreted_data || !(prescription.interpreted_data as any).ocr_source) && (
-                  <div style={{ marginBottom: 12, padding: '9px 12px', borderRadius: 9, background: 'rgba(217,119,6,.07)', border: '1px solid rgba(217,119,6,.2)' }}>
-                    <p style={{ fontSize: 11, color: '#92400e', margin: 0 }}>
-                      OCR service is not running. Add medicines manually below, then click <strong>Render</strong>.
-                    </p>
-                  </div>
-                )}
+                {/* Medicine table */}
+                {manualMeds.length > 0 && (() => {
+                  const thS: React.CSSProperties = {
+                    fontSize: 10, fontWeight: 700, color: 'var(--ink-light)', textTransform: 'uppercase',
+                    letterSpacing: '.5px', padding: '7px 12px', textAlign: 'left',
+                    background: 'var(--cell)', borderBottom: '1px solid var(--border)',
+                  }
+                  const tdS: React.CSSProperties = {
+                    fontSize: 12, color: 'var(--ink)', padding: '9px 12px',
+                    borderBottom: '1px solid var(--border)', verticalAlign: 'middle',
+                  }
+                  return (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr>
+                            <th style={{ ...thS, width: 32 }}>#</th>
+                            <th style={thS}>Medicine</th>
+                            <th style={{ ...thS, width: 50 }}>Qty</th>
+                            <th style={thS}>Frequency</th>
+                            <th style={{ ...thS, width: 90 }}>Duration</th>
+                            <th style={thS}>Notes</th>
+                            <th style={{ ...thS, width: 80 }}></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {manualMeds.map((med, idx) => (
+                            <tr key={med.id} style={{ background: editManualId === med.id ? 'rgba(13,148,136,.05)' : 'transparent' }}>
+                              <td style={{ ...tdS, textAlign: 'center' }}>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--teal-dark)', background: 'var(--teal-light)', borderRadius: 5, padding: '2px 6px' }}>{idx + 1}</span>
+                              </td>
+                              <td style={{ ...tdS, fontWeight: 600 }}>{med.name}</td>
+                              <td style={{ ...tdS, textAlign: 'center' }}>{med.quantity}/day</td>
+                              <td style={tdS}>
+                                <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                                  {(med.frequency ? med.frequency.split(', ') : []).map(f => {
+                                    const c = freqChipColor(f)
+                                    return <span key={f} style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: c.bg, color: c.color, border: `1px solid ${c.border}`, whiteSpace: 'nowrap' }}>{f}</span>
+                                  })}
+                                </div>
+                              </td>
+                              <td style={tdS}>
+                                <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 20, background: 'rgba(16,185,129,.1)', color: '#065f46', border: '1px solid rgba(16,185,129,.25)', whiteSpace: 'nowrap' }}>
+                                  {med.course}
+                                </span>
+                              </td>
+                              <td style={{ ...tdS, fontSize: 11, color: 'var(--ink-light)', fontStyle: 'italic' }}>{med.description ?? '—'}</td>
+                              <td style={tdS}>
+                                <div style={{ display: 'flex', gap: 4 }}>
+                                  <button
+                                    onClick={() => { setEditManualId(med.id); setShowAddManual(false) }}
+                                    style={{ padding: '4px 9px', borderRadius: 6, border: '1px solid var(--border)', background: editManualId === med.id ? 'var(--teal-light)' : 'var(--surface)', cursor: 'pointer', fontSize: 11, color: editManualId === med.id ? 'var(--teal)' : 'var(--ink-light)', fontFamily: 'var(--font-sans)' }}>
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteMed(med.id, med.name)}
+                                    disabled={deletingMedId === med.id}
+                                    style={{ padding: '4px 7px', borderRadius: 6, border: '1px solid rgba(239,68,68,.2)', background: 'rgba(239,68,68,.06)', cursor: 'pointer', fontSize: 11, color: '#ef4444', fontFamily: 'var(--font-sans)' }}>
+                                    {deletingMedId === med.id ? '…' : '✕'}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                })()}
 
-                {/* Medicine list */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {manualMeds.map(med =>
-                    editManualId === med.id ? (
-                      <div key={med.id} style={{ padding: 14, borderRadius: 10, background: 'var(--teal-light)', border: '1.5px solid rgba(0,184,148,.3)' }}>
-                        <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal-dark)', marginBottom: 10 }}>Edit medicine</p>
+                {/* Add / Edit form area */}
+                <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border)', background: 'rgba(13,148,136,.03)' }}>
+                  {editManualId !== null ? (() => {
+                    const med = manualMeds.find(m => m.id === editManualId)
+                    if (!med) return null
+                    return (
+                      <div>
+                        <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--teal-dark)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '.5px' }}>
+                          Editing: {med.name}
+                        </p>
                         <MedicineForm
                           prescriptionId={prescription.id}
-                          initial={{
-                            id: med.id,
-                            name: med.name,
-                            quantity: med.quantity,
-                            frequency: med.frequency ? med.frequency.split(', ') : [],
-                            course: med.course,
-                            description: med.description ?? '',
-                          }}
-                          submitLabel="Save Changes"
+                          initial={{ id: med.id, name: med.name, quantity: med.quantity, frequency: med.frequency ? med.frequency.split(', ') : [], course: med.course, description: med.description ?? '', with_food: (med as any).with_food ?? '' }}
+                          submitLabel="Save"
                           onDone={() => { setEditManualId(null); fetchPrescription() }}
                           onCancel={() => setEditManualId(null)}
                         />
                       </div>
-                    ) : (
-                      <div key={med.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '9px 12px', borderRadius: 9, background: 'var(--cell)', border: '1px solid var(--border)' }}>
-                        <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--teal-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.5">
-                            <path d="M12 5v14M5 12h14"/>
-                          </svg>
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)', marginBottom: 3 }}>{med.name}</p>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px' }}>
-                            {med.quantity  && <span style={{ fontSize: 11, color: 'var(--ink-light)' }}>Qty: <span style={{ color: 'var(--ink)' }}>{med.quantity}/day</span></span>}
-                            {med.frequency && <span style={{ fontSize: 11, color: 'var(--ink-light)' }}>Freq: <span style={{ color: 'var(--ink)' }}>{med.frequency}</span></span>}
-                            {med.course    && <span style={{ fontSize: 11, color: 'var(--ink-light)' }}>Duration: <span style={{ color: 'var(--ink)' }}>{med.course}</span></span>}
-                            {med.description && <span style={{ fontSize: 11, color: 'var(--ink-light)', width: '100%' }}>Note: <span style={{ color: 'var(--ink)' }}>{med.description}</span></span>}
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => { setEditManualId(med.id); setShowAddManual(false) }}
-                            style={{ fontSize: 11 }}>
-                            Edit
-                          </button>
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => handleDeleteMed(med.id, med.name)}
-                            disabled={deletingMedId === med.id}
-                            style={{ fontSize: 11, color: '#ef4444' }}>
-                            {deletingMedId === med.id ? '…' : '✕'}
-                          </button>
-                        </div>
-                      </div>
                     )
-                  )}
-
-                  {manualMeds.length === 0 && !showAddManual && (
-                    <p style={{ fontSize: 12, color: 'var(--ink-light)', fontStyle: 'italic' }}>
-                      No medicines added. Click "+ Add Medicine" to start.
-                    </p>
-                  )}
-
-                  {/* Add form */}
-                  {showAddManual && (
-                    <div style={{ padding: 14, borderRadius: 10, background: 'var(--teal-light)', border: '1.5px solid rgba(0,184,148,.3)' }}>
-                      <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--teal-dark)', marginBottom: 10 }}>Add Medicine</p>
+                  })() : !showAddManual ? (
+                    <button
+                      onClick={() => setShowAddManual(true)}
+                      style={{
+                        width: '100%', padding: '10px', borderRadius: 10, border: '1.5px dashed var(--teal)',
+                        background: 'transparent', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                        color: 'var(--teal)', fontFamily: 'var(--font-sans)', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center', gap: 6,
+                      }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <path d="M12 5v14M5 12h14"/>
+                      </svg>
+                      Add Medicine
+                    </button>
+                  ) : (
+                    <div>
+                      <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--teal-dark)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '.5px' }}>New Medicine</p>
                       <MedicineForm
                         prescriptionId={prescription.id}
                         initial={{ ...EMPTY_FORM }}
-                        submitLabel="Add Medicine"
+                        submitLabel="Add"
                         onDone={() => { setShowAddManual(false); fetchPrescription() }}
                         onCancel={() => setShowAddManual(false)}
                       />

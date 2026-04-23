@@ -88,6 +88,7 @@ export class PrescriptionsController {
       limit:      query.limit,
       search:     query.search,
       status:     query.status,
+      date:       query.date,
     });
   }
 

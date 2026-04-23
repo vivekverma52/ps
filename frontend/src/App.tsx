@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import { SuperAdminProvider, useSuperAdmin } from './context/SuperAdminContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
+import InstallPrompt from './components/InstallPrompt'
 
 // Public pages
 const LandingPage                  = lazy(() => import('./pages/LandingPage'))
@@ -108,6 +109,7 @@ export default function App() {
               success: { iconTheme: { primary: '#1D9E75', secondary: '#fff' } },
             }}
           />
+          <InstallPrompt />
           <ErrorBoundary>
           <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" /></div>}>
           <Routes>

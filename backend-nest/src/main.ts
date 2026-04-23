@@ -139,7 +139,7 @@ async function bootstrap() {
 
 process.on('unhandledRejection', (reason: any) => {
   process.stderr.write(JSON.stringify({
-    timestamp: new Date().toISOString(),
+    timestamp: new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().replace('Z', '+05:30'),
     level:     'error',
     context:   'Process',
     message:   'Unhandled promise rejection',
@@ -151,7 +151,7 @@ process.on('unhandledRejection', (reason: any) => {
 
 process.on('uncaughtException', (err: Error) => {
   process.stderr.write(JSON.stringify({
-    timestamp: new Date().toISOString(),
+    timestamp: new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().replace('Z', '+05:30'),
     level:     'error',
     context:   'Process',
     message:   'Uncaught exception — shutting down',
@@ -163,7 +163,7 @@ process.on('uncaughtException', (err: Error) => {
 
 bootstrap().catch((err) => {
   process.stderr.write(JSON.stringify({
-    timestamp: new Date().toISOString(),
+    timestamp: new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().replace('Z', '+05:30'),
     level:     'error',
     context:   'Bootstrap',
     message:   'Failed to start application',

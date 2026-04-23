@@ -460,7 +460,7 @@ function useHeroCanvas(ref: React.RefObject<HTMLCanvasElement>) {
       ctx.beginPath(); ctx.roundRect(winX, winY, winW, tbH, [14,14,0,0]); ctx.fill()
       // Traffic lights
       ;[["#ff5f57",0],["#febc2e",18],["#28c840",36]].forEach(([col, ox]) => {
-        ctx.beginPath(); ctx.arc(winX+14+ox, winY+tbH/2, Math.round(4.5*scale), 0, Math.PI*2)
+        ctx.beginPath(); ctx.arc(winX+14+(ox as number), winY+tbH/2, Math.round(4.5*scale), 0, Math.PI*2)
         ctx.fillStyle = col as string; ctx.fill()
       })
       // Title
