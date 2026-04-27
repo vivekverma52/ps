@@ -108,25 +108,6 @@ function manualMedicineToOcr(m: ManualMedicine): OcrMedicine {
 export class PrescriptionService implements OnModuleInit {
   private readonly logger = new Logger(PrescriptionService.name);
 
-  // Each upload (~10MB) lives in Node.js heap during S3 transfer.
-  // Cap at 20 concurrent uploads (~200MB peak) — safe for a 512MB ECS task.
-  private activeUploads = 0;
-  private readonly MAX_CONCURRENT_UPLOADS = 20;
-
-  acquireUploadSlot(): void {
-    if (this.activeUploads >= this.MAX_CONCURRENT_UPLOADS) {
-      this.logger.warn(`[UPLOAD] Concurrency limit reached — activeUploads=${this.activeUploads}`);
-      throw AppError.tooManyRequests('Server is busy processing uploads. Please try again in a moment.');
-    }
-    this.activeUploads++;
-    this.logger.log(`[UPLOAD] Slot acquired — activeUploads=${this.activeUploads}`);
-  }
-
-  releaseUploadSlot(): void {
-    this.activeUploads = Math.max(0, this.activeUploads - 1);
-    this.logger.log(`[UPLOAD] Slot released — activeUploads=${this.activeUploads}`);
-  }
-
   constructor(
     @Inject(MYSQL_POOL) private readonly pool: Pool,
     @InjectModel(Prescription.name)
@@ -957,8 +938,29 @@ export class PrescriptionService implements OnModuleInit {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  // ORCHESTRATION — S3 + DB + SQS in one transactional flow
+  // ORCHESTRATION — pre-signed upload flow
+  //
+  // Step 1: Client calls getUploadUrl() → receives a pre-signed S3 PUT URL + key.
+  // Step 2: Client uploads file directly to S3 (server never sees the bytes).
+  // Step 3: Client calls uploadAndCreatePrescription() with the key from step 1.
+  //
+  // Result: zero memory pressure on Node.js, unlimited concurrent uploads.
   // ═══════════════════════════════════════════════════════════════════════
+
+  async getUploadUrl(params: {
+    userId: string;
+    orgId: string | null;
+    filename: string;
+    mimetype: string;
+  }): Promise<{ upload_url: string; key: string; expires_in: number }> {
+    await this.assertSubscriptionLimit(params.orgId);
+    const { key, upload_url } = await this.s3Service.getPresignedUploadUrl(
+      params.filename,
+      params.mimetype,
+    );
+    this.logger.log(`[UPLOAD_URL] Generated — key=${key} userId=${params.userId}`);
+    return { upload_url, key, expires_in: 300 };
+  }
 
   async uploadAndCreatePrescription(params: {
     userId: string;
@@ -969,92 +971,54 @@ export class PrescriptionService implements OnModuleInit {
     patient_phone?: string;
     language?: string;
     notes?: string;
-    file?: Express.Multer.File;
+    imageKey?: string | null;
   }): Promise<WithUrls<Prescription>> {
-    const { file } = params;
-
     this.logger.log(`[UPLOAD] START doctor=${params.userId} orgId=${params.orgId} patient="${params.patient_name}"`);
     await this.assertSubscriptionLimit(params.orgId);
 
-    if (file) this.acquireUploadSlot();
+    const prescription = await this.withRetry(
+      () => this.createPrescription({
+        userId:        params.userId,
+        userName:      params.userName,
+        orgId:         params.orgId,
+        hospitalId:    params.hospitalId,
+        patient_name:  params.patient_name,
+        patient_phone: params.patient_phone,
+        language:      params.language,
+        notes:         params.notes,
+        imageKey:      params.imageKey ?? null,
+      }),
+      'DB prescription create',
+    );
 
-    let imageKey: string | null = null;
-    let imageUrl: string | null = null;
-    try {
-      if (file) {
-        const fileSizeKB = (file.size / 1024).toFixed(1);
-        this.logger.log(`[UPLOAD] Image: name="${file.originalname}" size=${fileSizeKB}KB type=${file.mimetype}`);
+    this.logger.log(`[UPLOAD] DB record created — prescriptionId=${prescription.id}`);
+
+    if (params.imageKey) {
+      const uploadQueueUrl = this.configService.get<string>('SQS_UPLOAD_QUEUE_URL');
+      if (!uploadQueueUrl) {
+        this.logger.warn(`[UPLOAD] SQS_UPLOAD_QUEUE_URL not set — OCR skipped prescriptionId=${prescription.id}`);
+      } else {
         try {
-          imageKey = await this.withRetry(
-            () => this.s3Service.uploadToS3(file.buffer, file.originalname, file.mimetype),
-            'S3 upload',
+          await this.withRetry(
+            () => this.sqsService.sendMessage(uploadQueueUrl, {
+              imageKey:  this.s3Service.getObjectUrl(params.imageKey!),
+              patientId: prescription.patient_uid,
+            }),
+            'SQS OCR enqueue',
           );
-          imageUrl = this.s3Service.getObjectUrl(imageKey);
-          this.logger.log(`[UPLOAD] S3 upload complete — key=${imageKey}`);
-        } catch (s3Err: any) {
-          this.logger.error(`[UPLOAD] S3 upload failed — aborting prescription creation: ${s3Err?.message}`);
-          throw new AppError(`Image upload failed: ${s3Err?.message ?? 'S3 unavailable'}. Please try again.`, 503, 'S3_UPLOAD_FAILED');
-        }
-      }
-
-      let prescription: WithUrls<Prescription>;
-      try {
-        // Retry the DB write — transient connection errors shouldn't orphan the S3 object
-        prescription = await this.withRetry(
-          () => this.createPrescription({
-            userId:        params.userId,
-            userName:      params.userName,
-            orgId:         params.orgId,
-            hospitalId:    params.hospitalId,
-            patient_name:  params.patient_name,
-            patient_phone: params.patient_phone,
-            language:      params.language,
-            notes:         params.notes,
-            imageKey,
-          }),
-          'DB prescription create',
-        );
-      } catch (dbErr) {
-        // All DB retries exhausted after S3 upload succeeded — remove the orphaned S3 object
-        if (imageKey) {
-          await this.s3Service.deleteObject(imageKey).catch((e: Error) =>
-            this.logger.error(`[UPLOAD] S3 rollback failed key=${imageKey}: ${e.message}`),
+          this.logger.log(`[UPLOAD] OCR queue message sent — prescriptionId=${prescription.id}`);
+        } catch (sqsErr) {
+          // Non-fatal — prescription is saved, OCR won't run automatically.
+          // Re-queue manually or via a sweep job if needed.
+          this.logger.error(
+            `[UPLOAD] SQS OCR enqueue failed — prescriptionId=${prescription.id}: ${(sqsErr as Error).message}`,
           );
         }
-        throw dbErr;
       }
-
-      this.logger.log(`[UPLOAD] DB record created — prescriptionId=${prescription.id}`);
-
-      if (imageKey && imageUrl) {
-        const uploadQueueUrl = this.configService.get<string>('SQS_UPLOAD_QUEUE_URL');
-        if (!uploadQueueUrl) {
-          this.logger.warn(`[UPLOAD] SQS_UPLOAD_QUEUE_URL not set — OCR skipped prescriptionId=${prescription.id}`);
-        } else {
-          try {
-            await this.withRetry(
-              () => this.sqsService.sendMessage(uploadQueueUrl, {
-                imageKey:  imageUrl,
-                patientId: prescription.patient_uid,
-              }),
-              'SQS OCR enqueue',
-            );
-            this.logger.log(`[UPLOAD] OCR queue message sent — prescriptionId=${prescription.id}`);
-          } catch (sqsErr) {
-            // Non-fatal: prescription + S3 image are already committed.
-            // Prescription stays in UPLOADED status — re-queue manually or via a sweep job.
-            this.logger.error(
-              `[UPLOAD] SQS OCR enqueue failed — prescriptionId=${prescription.id}: ${(sqsErr as Error).message}`,
-            );
-          }
-        }
-      }
-
-      this.logger.log(`[UPLOAD] DONE prescriptionId=${prescription.id} hasImage=${!!imageKey}`);
-      return prescription;
-    } finally {
-      if (file) this.releaseUploadSlot();
     }
+
+    this.logger.log(`[UPLOAD] DONE prescriptionId=${prescription.id} hasImage=${!!params.imageKey}`);
+    return prescription;
   }
 
   async uploadAndSaveMedicineImage(

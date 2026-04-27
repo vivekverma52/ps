@@ -23,6 +23,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/types/jwt-payload.interface';
 import { CreatePrescriptionDto } from './dto/create-prescription.dto';
+import { RequestUploadUrlDto } from './dto/request-upload-url.dto';
 import { UpdateRenderDto } from './dto/update-render.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { SaveInterpretedDataDto } from './dto/save-interpreted-data.dto';
@@ -52,28 +53,50 @@ const imageFileInterceptor = FileInterceptor('image', {
 export class PrescriptionsController {
   constructor(private readonly prescriptionService: PrescriptionService) {}
 
+  /**
+   * Step 1 of 2: request a pre-signed S3 PUT URL.
+   * Client uploads the file directly to S3 using this URL (PUT, no auth header needed).
+   * Returns the `key` to pass into POST /api/prescriptions as `image_key`.
+   */
+  @Post('upload-url')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('DOCTOR')
+  async getUploadUrl(
+    @CurrentUser() user: JwtPayload,
+    @Body() body: RequestUploadUrlDto,
+  ) {
+    return this.prescriptionService.getUploadUrl({
+      userId:   user.userId,
+      orgId:    user.orgId,
+      filename: body.filename,
+      mimetype: body.mimetype,
+    });
+  }
+
+  /**
+   * Step 2 of 2: create the prescription record.
+   * Pass `image_key` from the upload-url response if a file was uploaded.
+   */
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('DOCTOR')
-  @UseInterceptors(imageFileInterceptor)
   async create(
     @CurrentUser() user: JwtPayload,
     @Body() body: CreatePrescriptionDto,
-    @UploadedFile() file: Express.Multer.File | undefined,
   ) {
-    const prescription = await this.prescriptionService.uploadAndCreatePrescription({
-      userId:       user.userId,
-      userName:     user.name,
-      orgId:        user.orgId,
-      hospitalId:   user.hospitalId ?? null,
+    return this.prescriptionService.uploadAndCreatePrescription({
+      userId:        user.userId,
+      userName:      user.name,
+      orgId:         user.orgId,
+      hospitalId:    user.hospitalId ?? null,
       patient_name:  body.patient_name,
       patient_phone: body.patient_phone,
-      language:     body.language,
-      notes:        body.notes,
-      file,
+      language:      body.language,
+      notes:         body.notes,
+      imageKey:      body.image_key ?? null,
     });
-    return prescription;
   }
 
   @Get()

@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsString, IsOptional } from 'class-validator';
 
 export class CreatePrescriptionDto {
   @IsOptional()
@@ -16,4 +16,9 @@ export class CreatePrescriptionDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  /** S3 key returned by POST /upload-url — set after client uploads directly to S3. */
+  @IsOptional()
+  @IsString()
+  image_key?: string;
 }

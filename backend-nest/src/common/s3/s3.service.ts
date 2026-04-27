@@ -6,6 +6,11 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { AppError } from '../errors/app.error';
 
+const ALLOWED_UPLOAD_MIMETYPES = new Set([
+  'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+  'image/heic', 'image/heif', 'application/pdf',
+]);
+
 @Injectable()
 export class S3Service {
   private readonly logger = new Logger(S3Service.name);
@@ -89,6 +94,31 @@ export class S3Service {
       Key: key,
     });
     return getSignedUrl(this.s3, command, { expiresIn });
+  }
+
+  /**
+   * Generate a pre-signed S3 PUT URL so the client uploads directly to S3.
+   * The server never touches the file bytes — zero memory pressure.
+   * Returns the key (server-generated, client cannot inject paths) and the URL.
+   */
+  async getPresignedUploadUrl(
+    filename: string,
+    mimetype: string,
+    expiresIn = 300,
+  ): Promise<{ key: string; upload_url: string }> {
+    if (!ALLOWED_UPLOAD_MIMETYPES.has(mimetype)) {
+      throw new AppError(`File type not allowed: ${mimetype}`, 400, 'INVALID_MIME');
+    }
+    const ext = path.extname(filename).toLowerCase() || '.jpg';
+    const key = `prescriptions/${uuidv4()}${ext}`;
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      ContentType: mimetype,
+    });
+    const upload_url = await getSignedUrl(this.s3, command, { expiresIn });
+    this.logger.log(`[S3] Pre-signed upload URL — key=${key} expires=${expiresIn}s`);
+    return { key, upload_url };
   }
 
   /** Delete a single object by key — used for S3 rollback when a downstream DB write fails. */
