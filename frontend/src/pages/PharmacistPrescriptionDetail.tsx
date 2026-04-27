@@ -695,7 +695,7 @@ export default function PharmacistPrescriptionDetail() {
     setRendering(true)
     try {
       await api.put(`/prescriptions/${prescription!.id}/render`, { video_url: null })
-      toast.success('Render job sent!')
+      toast.success('Render Done!')
       fetchPrescription()
     } catch {
       toast.error('Render failed')
@@ -706,17 +706,13 @@ export default function PharmacistPrescriptionDetail() {
 
   const handleSend = async () => {
     if (!prescription) return
-    const msg = encodeURIComponent(
-      `Hello ${prescription.patient_name},\n\nYour prescription from Dr. ${prescription.doctor_name} is ready.\n\nView here: ${publicUrl}\n\n- ExatoTechnologies`
-    )
-    window.open(`https://wa.me/91${prescription.patient_phone}?text=${msg}`, '_blank')
     setSending(true)
     try {
       await api.put(`/prescriptions/${prescription.id}/status`, { status: 'SENT' })
-      toast.success('Sent to patient!')
+      toast.success('WhatsApp message queued for patient!')
       fetchPrescription()
     } catch {
-      toast.error('Could not update status')
+      toast.error('Could not send to patient')
     } finally {
       setSending(false)
     }

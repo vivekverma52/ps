@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -36,6 +36,8 @@ export class S3Service {
         accessKeyId: this.configService.get<string>('AWS_ACCESS_KEY_ID'),
         secretAccessKey: this.configService.get<string>('AWS_SECRET_ACCESS_KEY'),
       },
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
     });
   }
 
@@ -119,6 +121,14 @@ export class S3Service {
     const upload_url = await getSignedUrl(this.s3, command, { expiresIn });
     this.logger.log(`[S3] Pre-signed upload URL — key=${key} expires=${expiresIn}s`);
     return { key, upload_url };
+  }
+
+  /** Verify a client-uploaded object exists in S3 and log its size/type. */
+  async verifyUpload(key: string): Promise<void> {
+    const result = await this.s3.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
+    this.logger.log(
+      `[S3] Upload verified — key=${key} size=${result.ContentLength ?? '?'} bytes type=${result.ContentType ?? '?'}`,
+    );
   }
 
   /** Delete a single object by key — used for S3 rollback when a downstream DB write fails. */

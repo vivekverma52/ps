@@ -54,14 +54,29 @@ export default function HomePage() {
     if (!quickFile) return
     setUploading(true)
     try {
-      const form = new FormData()
-      // No patient_name / patient_phone — backend defaults to "Quick Upload" / "0000000000"
-      form.append('language', 'hi')
-      form.append('image', quickFile)
-      const res = await api.post('/prescriptions', form)
+      // Step 1: get a pre-signed S3 PUT URL
+      const mimetype = quickFile.type || 'image/jpeg'
+      const urlRes = await api.post('/prescriptions/upload-url', {
+        filename: quickFile.name,
+        mimetype,
+      })
+      const { upload_url, key } = urlRes.data.data
+
+      // Step 2: upload file directly to S3
+      const s3Res = await fetch(upload_url, {
+        method: 'PUT',
+        body: quickFile,
+        headers: { 'Content-Type': mimetype },
+      })
+      if (!s3Res.ok) throw new Error(`Image upload failed (${s3Res.status})`)
+
+      // Step 3: create the prescription record with the S3 key
+      const res = await api.post('/prescriptions', {
+        language:  'hi',
+        image_key: key,
+      })
       const prescription = res.data.data
       toast.success('Prescription uploaded!')
-      // Clean up
       if (quickPreview) URL.revokeObjectURL(quickPreview)
       setQuickFile(null)
       setQuickPreview(null)

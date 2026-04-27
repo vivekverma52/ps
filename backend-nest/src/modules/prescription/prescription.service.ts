@@ -134,6 +134,7 @@ export class PrescriptionService implements OnModuleInit {
     } else {
       this.sqsService.startPolling(videoResultQueueUrl, (body) => this.handleVideoResultMessage(body));
     }
+
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -633,6 +634,35 @@ export class PrescriptionService implements OnModuleInit {
 
     this.assertPrescriptionAccess(prescription, params);
     await this.prescriptionModel.updateOne({ id: prescription.id }, { $set: { status: upperStatus } });
+
+    if (upperStatus === 'SENT') {
+      const whatsappQueueUrl = this.configService.get<string>('SQS_WHATSAPP_QUEUE_URL');
+      const phone = prescription.patient_phone;
+
+      if (!whatsappQueueUrl) {
+        this.logger.warn(`[SEND:STATUS] SQS_WHATSAPP_QUEUE_URL not configured — WhatsApp skipped for prescription=${prescription.id}`);
+      } else if (!prescription.video_key) {
+        this.logger.warn(`[SEND:STATUS] No video_key on prescription=${prescription.id} — WhatsApp skipped`);
+      } else if (!phone || phone === '0000000000') {
+        this.logger.warn(`[SEND:STATUS] No valid phone on prescription=${prescription.id} — WhatsApp skipped`);
+      } else {
+        const bucket = this.configService.get<string>('AWS_S3_BUCKET');
+        const region = this.configService.get<string>('AWS_REGION');
+        const videoUrl = `https://${bucket}.s3.${region}.amazonaws.com/${prescription.video_key}`;
+        const digits = phone.replace(/\D/g, '');
+        const to = digits.startsWith('91') && digits.length >= 12 ? `+${digits}` : `+91${digits}`;
+        try {
+          await this.sqsService.sendMessage(whatsappQueueUrl, { to, videoUrl });
+          this.logger.log(`[SEND:STATUS] WhatsApp queued — prescription=${prescription.id} to=${to}`);
+        } catch (err) {
+          // Non-fatal: status is already SENT in DB — log and continue so the API call succeeds
+          this.logger.error(
+            `[SEND:STATUS] Failed to enqueue WhatsApp — prescription=${prescription.id} to=${to} error=${(err as Error).message}`,
+          );
+        }
+      }
+    }
+
     return { message: 'Status updated' };
   }
 
@@ -994,6 +1024,14 @@ export class PrescriptionService implements OnModuleInit {
     this.logger.log(`[UPLOAD] DB record created — prescriptionId=${prescription.id}`);
 
     if (params.imageKey) {
+      try {
+        await this.s3Service.verifyUpload(params.imageKey);
+      } catch (err: any) {
+        this.logger.warn(
+          `[UPLOAD] S3 object not found after client upload — key=${params.imageKey} error=${err.message}`,
+        );
+      }
+
       const uploadQueueUrl = this.configService.get<string>('SQS_UPLOAD_QUEUE_URL');
       if (!uploadQueueUrl) {
         this.logger.warn(`[UPLOAD] SQS_UPLOAD_QUEUE_URL not set — OCR skipped prescriptionId=${prescription.id}`);

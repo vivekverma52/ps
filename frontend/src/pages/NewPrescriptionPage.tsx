@@ -52,13 +52,31 @@ export default function NewPrescriptionPage() {
 
   const onSubmit = async (data: any) => {
     try {
-      const form = new FormData()
-      form.append('patient_name', data.patient_name)
-      form.append('patient_phone', data.patient_phone)
-      form.append('language', data.language)
-      if (data.notes) form.append('notes', data.notes)
-      if (file) form.append('image', file)
-      const res = await api.post('/prescriptions', form)
+      let imageKey: string | null = null
+
+      if (file) {
+        const mimetype = file.type || 'image/jpeg'
+        const urlRes = await api.post('/prescriptions/upload-url', {
+          filename: file.name,
+          mimetype,
+        })
+        const { upload_url, key } = urlRes.data.data
+        const s3Res = await fetch(upload_url, {
+          method: 'PUT',
+          body: file,
+          headers: { 'Content-Type': mimetype },
+        })
+        if (!s3Res.ok) throw new Error(`Image upload failed (${s3Res.status})`)
+        imageKey = key
+      }
+
+      const res = await api.post('/prescriptions', {
+        patient_name:  data.patient_name,
+        patient_phone: data.patient_phone,
+        language:      data.language,
+        notes:         data.notes || undefined,
+        image_key:     imageKey ?? undefined,
+      })
       const prescription = res.data.data
 
       // Save demo interpreted data (replace with real AI service call later)
