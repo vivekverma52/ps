@@ -1,8 +1,6 @@
 import { Module, Logger } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
 import { DatabaseModule } from './database/database.module';
@@ -38,31 +36,12 @@ const ALL_ENTITIES = [
 ];
 
 @Module({
-  providers: [
-    // Activate rate limiting globally — 100 requests per 15 minutes per IP.
-    // Individual controllers can override with @Throttle() or @SkipThrottle().
-    {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard,
-    },
-  ],
+  providers: [],
   imports: [
     // Config — load .env globally
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
-    }),
-
-    // Rate limiting
-    ThrottlerModule.forRootAsync({
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => [
-        {
-          ttl: configService.get<number>('RATE_LIMIT_TTL', 900) * 1000,
-          limit: configService.get<number>('RATE_LIMIT_MAX', 100),
-        },
-      ],
-      inject: [ConfigService],
     }),
 
     // MongoDB (medicine catalog / autocomplete)

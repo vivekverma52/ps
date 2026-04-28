@@ -9,7 +9,6 @@ import {
   UseInterceptors,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ThrottlerGuard } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -45,7 +44,6 @@ export class AuthController {
   @Post('superadmin/login')
   @HttpCode(HttpStatus.OK)
   @HttpMessage('Login successful')
-  @UseGuards(ThrottlerGuard)
   superadminLogin(@Body() dto: SuperadminLoginDto) {
     return this.authService.superadminLogin(dto.email, dto.password);
   }
@@ -55,7 +53,6 @@ export class AuthController {
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   @HttpMessage('Registered successfully')
-  @UseGuards(ThrottlerGuard)
   @UseInterceptors(RefreshTokenInterceptor)
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
@@ -64,7 +61,6 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @HttpMessage('Login successful')
-  @UseGuards(ThrottlerGuard)
   @UseInterceptors(RefreshTokenInterceptor)
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto.email, dto.password);
@@ -101,7 +97,6 @@ export class AuthController {
 
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(ThrottlerGuard)
   forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto.email);
   }
@@ -109,7 +104,6 @@ export class AuthController {
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @HttpMessage('Password reset successfully')
-  @UseGuards(ThrottlerGuard)
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto.email, dto.otp, dto.password);
   }

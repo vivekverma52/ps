@@ -98,7 +98,7 @@ export class SqsService implements OnModuleDestroy {
   ): Promise<void> {
     const serialised = JSON.stringify(body);
 
-    this.logger.debug(
+    this.logger.log(
       `[SQS:Producer] Sending to ${this.queueLabel(queueUrl)} — ` +
       `size=${serialised.length}B payload=${this.truncate(serialised, 200)}`,
     );
@@ -296,7 +296,7 @@ export class SqsService implements OnModuleDestroy {
           continue;
         }
 
-        this.logger.debug(
+        this.logger.log(
           `[SQS:Consumer] Received ${messages.length} message(s) — queue=${this.queueLabel(queueUrl)}`,
         );
 
@@ -438,7 +438,7 @@ export class SqsService implements OnModuleDestroy {
       await this.sqs.send(
         new DeleteMessageCommand({ QueueUrl: queueUrl, ReceiptHandle: receiptHandle }),
       );
-      this.logger.debug(
+      this.logger.log(
         `[SQS:Consumer] Message deleted — queue=${this.queueLabel(queueUrl)} messageId=${messageId}`,
       );
     } catch (err: any) {

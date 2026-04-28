@@ -652,7 +652,7 @@ export class PrescriptionService implements OnModuleInit {
         const digits = phone.replace(/\D/g, '');
         const to = digits.startsWith('91') && digits.length >= 12 ? `+${digits}` : `+91${digits}`;
         try {
-          await this.sqsService.sendMessage(whatsappQueueUrl, { to, videoUrl });
+          await this.sqsService.sendMessage(whatsappQueueUrl, { to, videoUrl, patientName: prescription.patient_name ?? 'Patient' });
           this.logger.log(`[SEND:STATUS] WhatsApp queued — prescription=${prescription.id} to=${to}`);
         } catch (err) {
           // Non-fatal: status is already SENT in DB — log and continue so the API call succeeds
